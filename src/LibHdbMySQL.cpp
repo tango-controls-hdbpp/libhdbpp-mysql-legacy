@@ -87,64 +87,19 @@ HdbMySQL::~HdbMySQL()
 	delete dbp;
 }
 
-
-int HdbMySQL::find_attr_id(vector<string> attr, vector<int> &ID)
-{
-	ostringstream query_str;
-	//example: 
-	//SELECT ID FROM adt
-	//	WHERE full_name IN (a/b/c/d, e/f/g/h)
-
-
-	//TODO: concatenate facility and full_name? ... WHERE CONCAT(ADT_COL_FACILITY, ADT_COL_FULL_NAME) IN (...)
-	query_str << 
-		"SELECT " << ADT_COL_ID << " FROM " << m_dbname << "." << ADT_TABLE_NAME <<
-			" WHERE " << ADT_COL_FULL_NAME << " IN ('";
-			
-	for(vector<string>::iterator it=attr.begin(); it != attr.end(); it++)
-	{
-		query_str << *it;
-		if(it+1 != attr.end())
-			query_str << "','";
-	}
-			
-	query_str << "') ";
-	
-	if(mysql_query(dbp, query_str.str().c_str()))
-	{
-		cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
-		return -1;
-	}
-	else
-	{
-		MYSQL_RES *res;
-		MYSQL_ROW row;
-		/*res = mysql_use_result(dbp);
-		my_ulonglong num_found = mysql_num_rows(res);
-		if(num_found == 0)*/
-		res = mysql_store_result(dbp);
-		if(res == NULL)
-		{
-			cout << __func__<< ": NO RESULT in query: " << query_str.str() << endl;
-			return -1;
-		}
-#ifdef _LIB_DEBUG
-		else
-		{
-			cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
-		}
-#endif
-		while ((row = mysql_fetch_row(res)))
-		{
-			ID.push_back(atoi(row[0]));
-		}	
-		mysql_free_result(res);
-	}
-	return 0;
-}
-
 int HdbMySQL::find_attr_id(string facility, string attr, int &ID)
 {
+	string complete_name = string("tango://") + facility + string("/") + attr;
+	map<string,int>::iterator it = attr_ID_map.find(complete_name);
+
+	if(it != attr_ID_map.end())
+	{
+		ID = it->second;
+		return 0;
+	}
+	//if not already present in cache, look for ID in the DB
+
+
 	ostringstream query_str;
 	string facility_no_domain = remove_domain(facility);
 
@@ -152,12 +107,12 @@ int HdbMySQL::find_attr_id(string facility, string attr, int &ID)
 	//TODO: concatenate facility and full_name? ... WHERE CONCAT(ADT_COL_FACILITY, ADT_COL_FULL_NAME) IN (...)
 	query_str << 
 		"SELECT " << ADT_COL_ID << " FROM " << m_dbname << "." << ADT_TABLE_NAME <<
-			" WHERE LOWER(" << ADT_COL_FULL_NAME << ")='" <<attr << "' AND LOWER(" << 
+			" WHERE LOWER(" << ADT_COL_FULL_NAME << ")='" <<attr << "' AND LOWER(" <<
 				ADT_COL_FACILITY << ") IN ('" << facility << "','" << facility_no_domain << "')";
 	
 	if(mysql_query(dbp, query_str.str().c_str()))
 	{
-		cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
+		cout<< __func__ << ": ERROR in query=" << query_str.str() << " err="<<mysql_error(dbp)<< endl;
 		return -1;
 	}
 	else
@@ -194,6 +149,106 @@ int HdbMySQL::find_attr_id(string facility, string attr, int &ID)
 			ID = atoi(row[0]);
 		}	
 		mysql_free_result(res);
+		if(ID != -1)
+		{
+			attr_ID_map.insert(make_pair(complete_name,ID));
+		}
+	}
+	return 0;
+}
+
+Attr_Type HdbMySQL::get_attr_type(int data_type, int data_format, int writable)
+{
+	if(data_type != Tango::DEV_STRING && data_format == Tango::SCALAR && writable == Tango::READ)
+	{
+		return scalar_double_ro;
+	}
+	else if(data_type != Tango::DEV_STRING && data_format == Tango::SCALAR && writable == Tango::READ_WRITE)
+	{
+		return scalar_double_rw;
+	}
+	else if(data_type != Tango::DEV_STRING && data_format == Tango::SPECTRUM && writable == Tango::READ)
+	{
+		return array_double_ro;
+	}
+	else if(data_type != Tango::DEV_STRING && data_format == Tango::SPECTRUM && writable == Tango::READ_WRITE)
+	{
+		return array_double_rw;
+	}
+	else if(data_type == Tango::DEV_STRING && data_format == Tango::SCALAR && writable == Tango::READ)
+	{
+		return scalar_string_ro;
+	}
+	else
+	{
+		return unknown;	//TODO: verify other types: string rw, string array, encoded, ...
+	}
+}
+
+int HdbMySQL::find_attr_id_type(string facility, string attr, int &ID, int data_type, int data_format, int writable)
+{
+	ostringstream query_str;
+	string facility_no_domain = remove_domain(facility);
+	int db_data_type, db_data_format, db_writable;
+
+	//TODO: concatenate facility and full_name? ... WHERE CONCAT(ADT_COL_FACILITY, ADT_COL_FULL_NAME) IN (...)
+	query_str << 
+		"SELECT " << ADT_COL_ID << "," << ADT_COL_DATA_TYPE << "," << ADT_COL_DATA_FORMAT << "," << ADT_COL_WRITABLE <<
+			" FROM " << m_dbname << "." << ADT_TABLE_NAME <<
+			" WHERE LOWER(" << ADT_COL_FULL_NAME << ")='" <<attr << "' AND LOWER(" << 
+				ADT_COL_FACILITY << ") IN ('" << facility << "','" << facility_no_domain << "')";
+	
+	if(mysql_query(dbp, query_str.str().c_str()))
+	{
+		cout<< __func__ << ": ERROR in query=" << query_str.str() << " err="<<mysql_error(dbp)<< endl;
+		return -1;
+	}
+	else
+	{
+		MYSQL_RES *res;
+		MYSQL_ROW row;
+		/*res = mysql_use_result(dbp);
+		my_ulonglong num_found = mysql_num_rows(res);
+		if(num_found == 0)*/
+		res = mysql_store_result(dbp);
+		if(res == NULL)
+		{
+			cout << __func__<< ": NO RESULT in query: " << query_str.str() << endl;
+			return -1;
+		}
+#ifdef _LIB_DEBUG
+		else
+		{
+			my_ulonglong num_found = mysql_num_rows(res);
+			if(num_found > 0)
+			{
+				cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
+			}
+			else
+			{
+				cout << __func__<< ": NO RESULT in query: " << query_str.str() << endl;
+				mysql_free_result(res);
+				return -1;
+			}
+		}
+#endif
+		while ((row = mysql_fetch_row(res)))
+		{
+			ID = atoi(row[0]);
+			db_data_type = atoi(row[1]);
+			db_data_format = atoi(row[2]);
+			db_writable = atoi(row[3]);
+		}
+		mysql_free_result(res);
+
+		if(get_attr_type(data_type, data_format, writable) != get_attr_type(db_data_type, db_data_format, db_writable))
+		{
+			cout << __func__<< ": FOUND ID="<<ID<<" but different type: data_type="<<data_type<<"-db_data_type="<<db_data_type<<
+					" data_format="<<data_format<<"-db_data_format="<<db_data_format<<" writable="<<writable<<"-db_writable="<<db_writable<< endl;
+			return -2;
+		}
+		else
+			return 0;
 	}
 	return 0;
 }
@@ -674,46 +729,22 @@ int HdbMySQL::store_double_RO(string attr, vector<double> value, double time)
 #ifdef _LIB_DEBUG
 //	cout << __func__<< ": entering..." << endl;
 #endif
-	map<string,int>::iterator it = attr_ID_map.find(attr);
-	//if not already present in cache, look for ID in the DB
-	if(it == attr_ID_map.end())
+
+	int ID=-1;
+	string facility = get_only_tango_host(attr);
+	string attr_name = get_only_attr_name(attr);
+	find_attr_id(facility, attr_name, ID);
+	if(ID == -1)
 	{
-		/*vector<string> attributes;
-		vector<int> ID;
-		attributes.push_back(attr);
-		find_attr_id(attributes, ID);
-		if(ID.size() == 1)
-		{
-			attr_ID_map.insert(make_pair(attr,ID[0]));
-			it = attr_ID_map.find(attr);
-		}
-		else
-		{
-			cout << __func__<< ": ID not found!" << endl;
-			return -1;
-		}*/
-		int ID=-1;
-		string facility = get_only_tango_host(attr);
-		string attr_name = get_only_attr_name(attr);
-		find_attr_id(facility, attr_name, ID);
-		if(ID != -1)
-		{
-			attr_ID_map.insert(make_pair(attr,ID));
-			it = attr_ID_map.find(attr);
-		}
-		else
-		{
-			cout << __func__<< ": ID not found!" << endl;
-			return -1;
-		}
+
+		cout << __func__<< ": ID not found!" << endl;
+		return -1;
 	}
-	if(it != attr_ID_map.end())
-	{
-		int ID=it->second;
-		ostringstream query_str;
-		char attr_tbl_name[64];
-		sprintf(attr_tbl_name,"%s%05d",ATT_TABLE_NAME,ID);
-		int timestamp = (int)(time);	//TODO
+
+	ostringstream query_str;
+	char attr_tbl_name[64];
+	sprintf(attr_tbl_name,"%s%05d",ATT_TABLE_NAME,ID);
+	int timestamp = (int)(time);	//TODO
 	  //example: 
 	  //INSERT INTO attr_12345
 	  //	(a/b/c/d, e/f/g/h)
@@ -721,119 +752,117 @@ int HdbMySQL::store_double_RO(string attr, vector<double> value, double time)
 //#define _NOT_BIND 1
 	  //TODO: concatenate facility and full_name? ... WHERE CONCAT(ADT_COL_FACILITY, ADT_COL_FULL_NAME) IN (...)
 #if _NOT_BIND
-		query_str << 
-			"INSERT INTO " << m_dbname << "." << attr_tbl_name <<
-				" (" << ATT_COL_TIME << ",";
-				if(value.size() > 1)
-					query_str << ATT_COL_DIMX << ",";
-				query_str << ATT_COL_VALUE_RO << ")" <<
-				" VALUES (FROM_UNIXTIME(" << timestamp << "),";
-				if(value.size() > 1)
-					query_str << value.size() << ",'";
-				query_str <<std::scientific<<setprecision(16);
-				for(uint32_t i=0; i<value.size(); i++)
-				{
-					if(!(std::isnan(value[i]) || std::isinf(value[i])) || value.size() > 1)	//TODO: ok nan and inf if spectrum?
-						query_str << value[i];
-					else
-						query_str << "NULL";		//TODO: which MySql supports nan and inf?
-					if(i != value.size()-1)
-						query_str << ", ";
-				}
-				if(value.size() > 1)
-					query_str << "'";
-				query_str << ")";
+	query_str <<
+		"INSERT INTO " << m_dbname << "." << attr_tbl_name <<
+			" (" << ATT_COL_TIME << ",";
+			if(value.size() > 1)
+				query_str << ATT_COL_DIMX << ",";
+			query_str << ATT_COL_VALUE_RO << ")" <<
+			" VALUES (FROM_UNIXTIME(" << timestamp << "),";
+			if(value.size() > 1)
+				query_str << value.size() << ",'";
+			query_str <<std::scientific<<setprecision(16);
+			for(uint32_t i=0; i<value.size(); i++)
+			{
+				if(!(std::isnan(value[i]) || std::isinf(value[i])) || value.size() > 1)	//TODO: ok nan and inf if spectrum?
+					query_str << value[i];
+				else
+					query_str << "NULL";		//TODO: which MySql supports nan and inf?
+				if(i != value.size()-1)
+					query_str << ", ";
+			}
+			if(value.size() > 1)
+				query_str << "'";
+			query_str << ")";
 
-		if(mysql_query(dbp, query_str.str().c_str()))
-		{
-			cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
-			return -1;
-		}
-		else
-		{
-#ifdef _LIB_DEBUG
-			cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
-#endif
-		}
-#else
-		query_str << 
-			"INSERT INTO " << m_dbname << "." << attr_tbl_name <<
-				" (" << ATT_COL_TIME << ",";
-				if(value.size() > 1)
-					query_str << ATT_COL_DIMX << ",";
-				query_str << ATT_COL_VALUE_RO << ")" <<
-				" VALUES (FROM_UNIXTIME(" << timestamp << "),";
-				if(value.size() > 1)
-					query_str << value.size() << ",'";
-				//query_str <<std::scientific<<setprecision(16);
-				for(uint32_t i=0; i<value.size(); i++)
-				{
-					//if(!(std::isnan(value[i]) || std::isinf(value[i])) || value.size() > 1)	//TODO: ok nan and inf if spectrum?
-						query_str << "?";
-					//else
-					//	query_str << "NULL";		//TODO: which MySql supports nan and inf?
-					if(i != value.size()-1)
-						query_str << ", ";
-				}
-				if(value.size() > 1)
-					query_str << "'";
-				query_str << ")";
-
-		MYSQL_STMT    *pstmt;
-		MYSQL_BIND    *plog_bind = new MYSQL_BIND[value.size()];
-		int           param_count;
-		pstmt = mysql_stmt_init(dbp);
-		if (!pstmt)
-		{
-			cout << __func__<< ": mysql_stmt_init(), out of memory" << endl;
-		}
-		if (mysql_stmt_prepare(pstmt, query_str.str().c_str(), query_str.str().length()))
-		{
-			cout << __func__<< ": mysql_stmt_prepare(), INSERT failed" << endl;
-		}
-
-		param_count= mysql_stmt_param_count(pstmt);
-	
-		if (param_count != value.size())
-		{
-			cout << __func__<< ": invalid parameter count returned by MySQL" << endl;
-		}
-		memset(plog_bind, 0, sizeof(MYSQL_BIND)*value.size());
-		for(uint32_t i=0; i<value.size(); i++)
-		{
-			plog_bind[0].buffer_type= MYSQL_TYPE_DOUBLE;
-			plog_bind[0].buffer= (void *)&value[i];
-			plog_bind[0].is_null= 0;
-			plog_bind[0].length= 0;
-		}
-	
-		if (mysql_stmt_bind_param(pstmt, plog_bind))
-			cout << __func__<< ": mysql_stmt_bind_param() failed" << endl;
-		
-		if (mysql_stmt_execute(pstmt))
-		{
-			cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
-			delete [] plog_bind;
-			if (mysql_stmt_close(pstmt))
-				cout << __func__<< ": failed while closing the statement" << endl;
-			return -1;
-		}
-		else
-		{
-#ifdef _LIB_DEBUG
-			cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
-#endif
-		}
-		delete [] plog_bind;
-
-/*		if (paffected_rows != 1)
-			DEBUG_STREAM << "log_srvc: invalid affected rows " << endl;*/
-		if (mysql_stmt_close(pstmt))
-			cout << __func__<< ": failed while closing the statement" << endl;
-#endif
+	if(mysql_query(dbp, query_str.str().c_str()))
+	{
+		cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
+		return -1;
 	}
 	else
+	{
+#ifdef _LIB_DEBUG
+		cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
+#endif
+	}
+#else
+	query_str <<
+		"INSERT INTO " << m_dbname << "." << attr_tbl_name <<
+			" (" << ATT_COL_TIME << ",";
+			if(value.size() > 1)
+				query_str << ATT_COL_DIMX << ",";
+			query_str << ATT_COL_VALUE_RO << ")" <<
+			" VALUES (FROM_UNIXTIME(" << timestamp << "),";
+			if(value.size() > 1)
+				query_str << value.size() << ",'";
+			//query_str <<std::scientific<<setprecision(16);
+			for(uint32_t i=0; i<value.size(); i++)
+			{
+				//if(!(std::isnan(value[i]) || std::isinf(value[i])) || value.size() > 1)	//TODO: ok nan and inf if spectrum?
+					query_str << "?";
+				//else
+				//	query_str << "NULL";		//TODO: which MySql supports nan and inf?
+				if(i != value.size()-1)
+					query_str << ", ";
+			}
+			if(value.size() > 1)
+				query_str << "'";
+			query_str << ")";
+
+	MYSQL_STMT    *pstmt;
+	MYSQL_BIND    *plog_bind = new MYSQL_BIND[value.size()];
+	int           param_count;
+	pstmt = mysql_stmt_init(dbp);
+	if (!pstmt)
+	{
+		cout << __func__<< ": mysql_stmt_init(), out of memory" << endl;
+	}
+	if (mysql_stmt_prepare(pstmt, query_str.str().c_str(), query_str.str().length()))
+	{
+		cout << __func__<< ": mysql_stmt_prepare(), INSERT failed" << endl;
+	}
+
+	param_count= mysql_stmt_param_count(pstmt);
+	
+	if (param_count != value.size())
+	{
+		cout << __func__<< ": invalid parameter count returned by MySQL" << endl;
+	}
+	memset(plog_bind, 0, sizeof(MYSQL_BIND)*value.size());
+	for(uint32_t i=0; i<value.size(); i++)
+	{
+		plog_bind[0].buffer_type= MYSQL_TYPE_DOUBLE;
+		plog_bind[0].buffer= (void *)&value[i];
+		plog_bind[0].is_null= 0;
+		plog_bind[0].length= 0;
+	}
+	
+	if (mysql_stmt_bind_param(pstmt, plog_bind))
+		cout << __func__<< ": mysql_stmt_bind_param() failed" << endl;
+		
+	if (mysql_stmt_execute(pstmt))
+	{
+		cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
+		delete [] plog_bind;
+		if (mysql_stmt_close(pstmt))
+			cout << __func__<< ": failed while closing the statement" << endl;
 		return -1;
+	}
+	else
+	{
+#ifdef _LIB_DEBUG
+		cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
+#endif
+	}
+	delete [] plog_bind;
+
+/*	if (paffected_rows != 1)
+		DEBUG_STREAM << "log_srvc: invalid affected rows " << endl;*/
+	if (mysql_stmt_close(pstmt))
+		cout << __func__<< ": failed while closing the statement" << endl;
+#endif
+
 	return 0;
 }
 
@@ -842,103 +871,75 @@ int HdbMySQL::store_double_RW(string attr, vector<double> value_r, vector<double
 #ifdef _LIB_DEBUG
 //	cout << __func__<< ": entering..." << endl;
 #endif
-	map<string,int>::iterator it = attr_ID_map.find(attr);
-	//if not already present in cache, look for ID in the DB
-	if(it == attr_ID_map.end())
+	int ID=-1;
+	string facility = get_only_tango_host(attr);
+	string attr_name = get_only_attr_name(attr);
+	find_attr_id(facility, attr_name, ID);
+	if(ID == -1)
 	{
-		/*vector<string> attributes;
-		vector<int> ID;
-		attributes.push_back(attr);
-		find_attr_id(attributes, ID);
-		if(ID.size() == 1)
-		{
-			attr_ID_map.insert(make_pair(attr,ID[0]));
-			it = attr_ID_map.find(attr);
-		}
-		else
-		{
-			cout << __func__<< ": ID not found!" << endl;
-			return -1;
-		}*/
-		int ID=-1;
-		string facility = get_only_tango_host(attr);
-		string attr_name = get_only_attr_name(attr);
-		find_attr_id(facility, attr_name, ID);
-		if(ID != -1)
-		{
-			attr_ID_map.insert(make_pair(attr,ID));
-			it = attr_ID_map.find(attr);
-		}
-		else
-		{
-			cout << __func__<< ": ID not found!" << endl;
-			return -1;
-		}
+
+		cout << __func__<< ": ID not found!" << endl;
+		return -1;
 	}
-	if(it != attr_ID_map.end())
-	{
-		int ID=it->second;
-		ostringstream query_str;
-		char attr_tbl_name[64];
-		sprintf(attr_tbl_name,"%s%05d",ATT_TABLE_NAME,ID);
-		int timestamp = (int)(time);	//TODO
-	  //example: 
-	  //INSERT INTO attr_12345
-	  //	(a/b/c/d, e/f/g/h)
+
+	ostringstream query_str;
+	char attr_tbl_name[64];
+	sprintf(attr_tbl_name,"%s%05d",ATT_TABLE_NAME,ID);
+	int timestamp = (int)(time);	//TODO
+  //example:
+  //INSERT INTO attr_12345
+  //	(a/b/c/d, e/f/g/h)
 
 
-	  //TODO: concatenate facility and full_name? ... WHERE CONCAT(ADT_COL_FACILITY, ADT_COL_FULL_NAME) IN (...)
-	  query_str << 
-			"INSERT INTO " << m_dbname << "." << attr_tbl_name <<
-				" (" << ATT_COL_TIME << ",";
-				if(value_r.size() > 1)
-					query_str << ATT_COL_DIMX << ",";
-				query_str << ATT_COL_R_VALUE_RW << "," << ATT_COL_W_VALUE_RW << ")" <<
-				" VALUES (FROM_UNIXTIME(" << timestamp << "),";
-				if(value_r.size() > 1)
-					query_str << value_r.size() << ",'";
-				query_str <<std::scientific<<setprecision(16);
-				for(uint32_t i=0; i<value_r.size(); i++)
-				{
-					if(!(std::isnan(value_r[i]) || std::isinf(value_r[i])) || value_r.size() > 1)	//TODO: ok nan and inf if spectrum?
-						query_str << value_r[i];
-					else
-						query_str << "NULL";		//TODO: which MySql supports nan and inf?
-					if(i != value_r.size()-1)
-						query_str << ", ";
-				}
-				if(value_r.size() > 1)
-					query_str << "','";
+  //TODO: concatenate facility and full_name? ... WHERE CONCAT(ADT_COL_FACILITY, ADT_COL_FULL_NAME) IN (...)
+  query_str <<
+		"INSERT INTO " << m_dbname << "." << attr_tbl_name <<
+			" (" << ATT_COL_TIME << ",";
+			if(value_r.size() > 1)
+				query_str << ATT_COL_DIMX << ",";
+			query_str << ATT_COL_R_VALUE_RW << "," << ATT_COL_W_VALUE_RW << ")" <<
+			" VALUES (FROM_UNIXTIME(" << timestamp << "),";
+			if(value_r.size() > 1)
+				query_str << value_r.size() << ",'";
+			query_str <<std::scientific<<setprecision(16);
+			for(uint32_t i=0; i<value_r.size(); i++)
+			{
+				if(!(std::isnan(value_r[i]) || std::isinf(value_r[i])) || value_r.size() > 1)	//TODO: ok nan and inf if spectrum?
+					query_str << value_r[i];
 				else
-					query_str << ",";
-				for(uint32_t i=0; i<value_w.size(); i++)
-				{
-					if(!(std::isnan(value_w[i]) || std::isinf(value_w[i])) || value_w.size() > 1)	//TODO: ok nan and inf if spectrum?
-						query_str << value_w[i];
-					else
-						query_str << "NULL";		//TODO: which MySql supports nan and inf?
-					if(i != value_w.size()-1)
-						query_str << ", ";
-				}
-				if(value_r.size() > 1)
-					query_str << "'";
-				query_str << ")";
-			  
-	  
-		if(mysql_query(dbp, query_str.str().c_str()))
-		{
-			cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
-			return -1;
-		}
-		else
-		{
-#ifdef _LIB_DEBUG
-			cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
-#endif
-		}
+					query_str << "NULL";		//TODO: which MySql supports nan and inf?
+				if(i != value_r.size()-1)
+					query_str << ", ";
+			}
+			if(value_r.size() > 1)
+				query_str << "','";
+			else
+				query_str << ",";
+			for(uint32_t i=0; i<value_w.size(); i++)
+			{
+				if(!(std::isnan(value_w[i]) || std::isinf(value_w[i])) || value_w.size() > 1)	//TODO: ok nan and inf if spectrum?
+					query_str << value_w[i];
+				else
+					query_str << "NULL";		//TODO: which MySql supports nan and inf?
+				if(i != value_w.size()-1)
+					query_str << ", ";
+			}
+			if(value_r.size() > 1)
+				query_str << "'";
+			query_str << ")";
+
+
+	if(mysql_query(dbp, query_str.str().c_str()))
+	{
+		cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
+		return -1;
 	}
 	else
-		return -1;
+	{
+#ifdef _LIB_DEBUG
+		cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
+#endif
+	}
 	return 0;
 }
 
@@ -947,85 +948,57 @@ int HdbMySQL::store_string_RO(string attr, vector<string> value, double time)
 #ifdef _LIB_DEBUG
 //	cout << __func__<< ": entering..." << endl;
 #endif
-	map<string,int>::iterator it = attr_ID_map.find(attr);
-	//if not already present in cache, look for ID in the DB
-	if(it == attr_ID_map.end())
+	int ID=-1;
+	string facility = get_only_tango_host(attr);
+	string attr_name = get_only_attr_name(attr);
+	find_attr_id(facility, attr_name, ID);
+	if(ID == -1)
 	{
-		/*vector<string> attributes;
-		vector<int> ID;
-		attributes.push_back(attr);
-		find_attr_id(attributes, ID);
-		if(ID.size() == 1)
-		{
-			attr_ID_map.insert(make_pair(attr,ID[0]));
-			it = attr_ID_map.find(attr);
-		}
-		else
-		{
-			cout << __func__<< ": ID not found!" << endl;
-			return -1;
-		}*/
-		int ID=-1;
-		string facility = get_only_tango_host(attr);
-		string attr_name = get_only_attr_name(attr);
-		find_attr_id(facility, attr_name, ID);
-		if(ID != -1)
-		{
-			attr_ID_map.insert(make_pair(attr,ID));
-			it = attr_ID_map.find(attr);
-		}
-		else
-		{
-			cout << __func__<< ": ID not found!" << endl;
-			return -1;
-		}
+
+		cout << __func__<< ": ID not found!" << endl;
+		return -1;
 	}
-	if(it != attr_ID_map.end())
+
+	ostringstream query_str;
+	char attr_tbl_name[64];
+	sprintf(attr_tbl_name,"%s%05d",ATT_TABLE_NAME,ID);
+	int timestamp = (int)(time);	//TODO
+  //example:
+  //INSERT INTO attr_12345
+  //	(a/b/c/d, e/f/g/h)
+
+
+  //TODO: concatenate facility and full_name? ... WHERE CONCAT(ADT_COL_FACILITY, ADT_COL_FULL_NAME) IN (...)
+  query_str <<
+		"INSERT INTO " << m_dbname << "." << attr_tbl_name <<
+			" (" << ATT_COL_TIME << ",";
+			if(value.size() > 1)
+				query_str << ATT_COL_DIMX << ",";
+			query_str << ATT_COL_VALUE_RO << ")" <<
+			" VALUES (FROM_UNIXTIME(" << timestamp << "),";
+			if(value.size() > 1)
+				query_str << value.size() << ",";
+			query_str <<std::scientific<<setprecision(16)<<"'";
+			for(uint32_t i=0; i<value.size(); i++)
+			{
+				query_str << value[i];
+				if(i != value.size()-1)
+					query_str << ", ";
+			 }
+			query_str << "')";
+
+
+	if(mysql_query(dbp, query_str.str().c_str()))
 	{
-		int ID=it->second;
-		ostringstream query_str;
-		char attr_tbl_name[64];
-		sprintf(attr_tbl_name,"%s%05d",ATT_TABLE_NAME,ID);
-		int timestamp = (int)(time);	//TODO
-	  //example: 
-	  //INSERT INTO attr_12345
-	  //	(a/b/c/d, e/f/g/h)
-
-
-	  //TODO: concatenate facility and full_name? ... WHERE CONCAT(ADT_COL_FACILITY, ADT_COL_FULL_NAME) IN (...)
-	  query_str << 
-			"INSERT INTO " << m_dbname << "." << attr_tbl_name <<
-				" (" << ATT_COL_TIME << ",";
-				if(value.size() > 1)
-					query_str << ATT_COL_DIMX << ",";
-				query_str << ATT_COL_VALUE_RO << ")" <<
-				" VALUES (FROM_UNIXTIME(" << timestamp << "),";
-				if(value.size() > 1)
-					query_str << value.size() << ",";
-				query_str <<std::scientific<<setprecision(16)<<"'";
-				for(uint32_t i=0; i<value.size(); i++)
-				{
-					query_str << value[i];
-					if(i != value.size()-1)
-						query_str << ", ";
-				 }
-				query_str << "')";
-			  
-	  
-		if(mysql_query(dbp, query_str.str().c_str()))
-		{
-			cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
-			return -1;
-		}
-		else
-		{
-#ifdef _LIB_DEBUG
-			cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
-#endif
-		}
+		cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
+		return -1;
 	}
 	else
-		return -1;
+	{
+#ifdef _LIB_DEBUG
+		cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
+#endif
+	}
 	return 0;
 }
 
@@ -1034,92 +1007,64 @@ int HdbMySQL::store_string_RW(string attr, vector<string> value_r, vector<string
 #ifdef _LIB_DEBUG
 //	cout << __func__<< ": entering..." << endl;
 #endif
-	map<string,int>::iterator it = attr_ID_map.find(attr);
-	//if not already present in cache, look for ID in the DB
-	if(it == attr_ID_map.end())
+	int ID=-1;
+	string facility = get_only_tango_host(attr);
+	string attr_name = get_only_attr_name(attr);
+	find_attr_id(facility, attr_name, ID);
+	if(ID == -1)
 	{
-		/*vector<string> attributes;
-		vector<int> ID;
-		attributes.push_back(attr);
-		find_attr_id(attributes, ID);
-		if(ID.size() == 1)
-		{
-			attr_ID_map.insert(make_pair(attr,ID[0]));
-			it = attr_ID_map.find(attr);
-		}
-		else
-		{
-			cout << __func__<< ": ID not found!" << endl;
-			return -1;
-		}*/
-		int ID=-1;
-		string facility = get_only_tango_host(attr);
-		string attr_name = get_only_attr_name(attr);
-		find_attr_id(facility, attr_name, ID);
-		if(ID != -1)
-		{
-			attr_ID_map.insert(make_pair(attr,ID));
-			it = attr_ID_map.find(attr);
-		}
-		else
-		{
-			cout << __func__<< ": ID not found!" << endl;
-			return -1;
-		}
+
+		cout << __func__<< ": ID not found!" << endl;
+		return -1;
 	}
-	if(it != attr_ID_map.end())
+
+	ostringstream query_str;
+	char attr_tbl_name[64];
+	sprintf(attr_tbl_name,"%s%05d",ATT_TABLE_NAME,ID);
+	int timestamp = (int)(time);	//TODO
+  //example:
+  //INSERT INTO attr_12345
+  //	(a/b/c/d, e/f/g/h)
+
+
+  //TODO: concatenate facility and full_name? ... WHERE CONCAT(ADT_COL_FACILITY, ADT_COL_FULL_NAME) IN (...)
+  query_str <<
+		"INSERT INTO " << m_dbname << "." << attr_tbl_name <<
+			" (" << ATT_COL_TIME << ",";
+			if(value_r.size() > 1)
+				query_str << ATT_COL_DIMX << ",";
+			query_str << ATT_COL_R_VALUE_RW << "," << ATT_COL_W_VALUE_RW << ")" <<
+			" VALUES (FROM_UNIXTIME(" << timestamp << "),";
+			if(value_r.size() > 1)
+				query_str << value_r.size() << ",";
+			query_str <<std::scientific<<setprecision(16)<<"'";
+			for(uint32_t i=0; i<value_r.size(); i++)
+			{
+				query_str << value_r[i];
+				if(i != value_r.size()-1)
+					query_str << ", ";
+			}
+			query_str << "','";
+			for(uint32_t i=0; i<value_w.size(); i++)
+			{
+				query_str << value_w[i];
+				if(i != value_w.size()-1)
+					query_str << ", ";
+			}
+			query_str << "')";
+
+
+	if(mysql_query(dbp, query_str.str().c_str()))
 	{
-		int ID=it->second;
-		ostringstream query_str;
-		char attr_tbl_name[64];
-		sprintf(attr_tbl_name,"%s%05d",ATT_TABLE_NAME,ID);
-		int timestamp = (int)(time);	//TODO
-	  //example: 
-	  //INSERT INTO attr_12345
-	  //	(a/b/c/d, e/f/g/h)
-
-
-	  //TODO: concatenate facility and full_name? ... WHERE CONCAT(ADT_COL_FACILITY, ADT_COL_FULL_NAME) IN (...)
-	  query_str << 
-			"INSERT INTO " << m_dbname << "." << attr_tbl_name <<
-				" (" << ATT_COL_TIME << ",";
-				if(value_r.size() > 1)
-					query_str << ATT_COL_DIMX << ",";
-				query_str << ATT_COL_R_VALUE_RW << "," << ATT_COL_W_VALUE_RW << ")" <<
-				" VALUES (FROM_UNIXTIME(" << timestamp << "),";
-				if(value_r.size() > 1)
-					query_str << value_r.size() << ",";
-				query_str <<std::scientific<<setprecision(16)<<"'";
-				for(uint32_t i=0; i<value_r.size(); i++)
-				{
-					query_str << value_r[i];
-					if(i != value_r.size()-1)
-						query_str << ", ";
-				}
-				query_str << "','";
-				for(uint32_t i=0; i<value_w.size(); i++)
-				{
-					query_str << value_w[i];
-					if(i != value_w.size()-1)
-						query_str << ", ";
-				}
-				query_str << "')";
-			  
-	  
-		if(mysql_query(dbp, query_str.str().c_str()))
-		{
-			cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
-			return -1;
-		}
-		else
-		{
-#ifdef _LIB_DEBUG
-			cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
-#endif
-		}
+		cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
+		return -1;
 	}
 	else
-		return -1;
+	{
+#ifdef _LIB_DEBUG
+		cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
+#endif
+	}
 	return 0;
 }
 
@@ -1129,23 +1074,32 @@ int HdbMySQL::configure_Attr(string name, int type/*DEV_DOUBLE, DEV_STRING, ..*/
 	string facility = get_only_tango_host(name);
 	string attr_name = get_only_attr_name(name);
 
-	int id=0;
-	int ret = find_attr_id(facility, attr_name, id);
-	if(ret == 0)
+	int id=-1;
+	int ret = find_attr_id_type(facility, attr_name, id, type, format, write_type);
+	//ID already present but different configuration (attribute type)
+	if(ret == -2)
 	{
 		cout<< __func__ << ": ERROR "<<facility<<"/"<<attr_name<<" already configured with ID="<<id << endl;
 		return -1;
 	}
 
+	//ID found and same configuration (attribute type): do nothing
+	if(ret == 0)
+	{
+		cout<< __func__ << ": ALREADY CONFIGURED with same configuration: "<<facility<<"/"<<attr_name<<" with ID="<<id << endl;
+		return 0;
+	}
+	//ID not found: create new table
 	insert_str <<
-		"INSERT INTO " << ADT_TABLE_NAME << " ("<<ADT_COL_FULL_NAME<<","<<ADT_COL_FACILITY<<")" <<
-			" VALUES ('" << attr_name << "','" << facility << "')";
+		"INSERT INTO " << m_dbname << "." << ADT_TABLE_NAME << " ("<<ADT_COL_FULL_NAME<<","<<ADT_COL_FACILITY<<","<<ADT_COL_TIME<<")" <<
+			" VALUES ('" << attr_name << "','" << facility << "',NOW())";
 
 	if(mysql_query(dbp, insert_str.str().c_str()))
 	{
 		cout<< __func__ << ": ERROR in query=" << insert_str.str() << endl;
 		return -1;
 	}
+
 	else
 	{
 		int last_id = mysql_insert_id(dbp);
@@ -1154,60 +1108,73 @@ int HdbMySQL::configure_Attr(string name, int type/*DEV_DOUBLE, DEV_STRING, ..*/
 		ostringstream create_str;
 
 		//TODO: type
-		if(type != Tango::DEV_STRING && format == Tango::SCALAR && write_type == Tango::READ)
+		Attr_Type attr_type = get_attr_type(type, format, write_type);
+		switch(attr_type)
 		{
-			create_str <<
-				"CREATE TABLE IF NOT EXISTS " << attr_tbl_name <<
-					"( " <<
-						ATT_COL_TIME << " datetime not null default '0000-00-00 00:00:00'," <<
-						ATT_COL_VALUE_RO << " double default NULL," <<
-						"INDEX(time)" <<
-					")";
+			case scalar_double_ro:
+			{
+				create_str <<
+					"CREATE TABLE IF NOT EXISTS " << m_dbname << "." << attr_tbl_name <<
+						"( " <<
+							ATT_COL_TIME << " datetime not null default '0000-00-00 00:00:00'," <<
+							ATT_COL_VALUE_RO << " double default NULL," <<
+							"INDEX(time)" <<
+						")";
+			}
+			break;
+			case scalar_double_rw:
+			{
+				create_str <<
+					"CREATE TABLE IF NOT EXISTS " << m_dbname << "." << attr_tbl_name <<
+						"( " <<
+							ATT_COL_TIME << " datetime not null default '0000-00-00 00:00:00'," <<
+							ATT_COL_R_VALUE_RW << " double default NULL," <<
+							ATT_COL_W_VALUE_RW << " double default NULL," <<
+							"INDEX(time)" <<
+						")";
+			}
+			break;
+			case array_double_ro:
+			{
+				create_str <<
+					"CREATE TABLE IF NOT EXISTS " << m_dbname << "." << attr_tbl_name <<
+						"( " <<
+							ATT_COL_TIME << " datetime not null default '0000-00-00 00:00:00'," <<
+							ATT_COL_DIMX << " smallint(6) not null," <<
+							ATT_COL_VALUE_RO << " blob default NULL," <<
+							"INDEX(time)" <<
+						")";
+			}
+			break;
+			case array_double_rw:
+			{
+				create_str <<
+					"CREATE TABLE IF NOT EXISTS " << m_dbname << "." << attr_tbl_name <<
+						"( " <<
+							ATT_COL_TIME << " datetime not null default '0000-00-00 00:00:00'," <<
+							ATT_COL_DIMX << " smallint(6) not null," <<
+							ATT_COL_R_VALUE_RW << " blob default NULL," <<
+							ATT_COL_W_VALUE_RW << " blob default NULL," <<
+							"INDEX(time)" <<
+						")";
+			}
+			break;
+			case scalar_string_ro:
+			{
+				create_str <<
+					"CREATE TABLE IF NOT EXISTS " << m_dbname << "." << attr_tbl_name <<
+						"( " <<
+							ATT_COL_TIME << " datetime not null default '0000-00-00 00:00:00'," <<
+							ATT_COL_VALUE_RO << " varchar(255) default NULL," <<
+							"INDEX(time)" <<
+						")";
+			}
+			break;
+			default:
+				cout << __func__ << ": attribute type not supported: data_type="<< type << " data_format=" << format << " writable=" << write_type << endl;
+				return -1;
 		}
-		else if(type != Tango::DEV_STRING && format == Tango::SCALAR && write_type == Tango::READ_WRITE)
-		{
-			create_str <<
-				"CREATE TABLE IF NOT EXISTS " << attr_tbl_name <<
-					"( " <<
-						ATT_COL_TIME << " datetime not null default '0000-00-00 00:00:00'," <<
-						ATT_COL_R_VALUE_RW << " double default NULL," <<
-						ATT_COL_W_VALUE_RW << " double default NULL," <<
-						"INDEX(time)" <<
-					")";
-		}
-		else if(type != Tango::DEV_STRING && format == Tango::SPECTRUM && write_type == Tango::READ)
-		{
-			create_str <<
-				"CREATE TABLE IF NOT EXISTS " << attr_tbl_name <<
-					"( " <<
-						ATT_COL_TIME << " datetime not null default '0000-00-00 00:00:00'," <<
-						ATT_COL_DIMX << " smallint(6) not null," <<
-						ATT_COL_VALUE_RO << " blob default NULL," <<
-						"INDEX(time)" <<
-					")";
-		}
-		else if(type != Tango::DEV_STRING && format == Tango::SPECTRUM && write_type == Tango::READ_WRITE)
-		{
-			create_str <<
-				"CREATE TABLE IF NOT EXISTS " << attr_tbl_name <<
-					"( " <<
-						ATT_COL_TIME << " datetime not null default '0000-00-00 00:00:00'," <<
-						ATT_COL_DIMX << " smallint(6) not null," <<
-						ATT_COL_R_VALUE_RW << " blob default NULL," <<
-						ATT_COL_W_VALUE_RW << " blob default NULL," <<
-						"INDEX(time)" <<
-					")";
-		}
-		else if(type == Tango::DEV_STRING && format == Tango::SCALAR && write_type == Tango::READ)
-		{
-			create_str <<
-				"CREATE TABLE IF NOT EXISTS " << attr_tbl_name <<
-					"( " <<
-						ATT_COL_TIME << " datetime not null default '0000-00-00 00:00:00'," <<
-						ATT_COL_VALUE_RO << " varchar(255) default NULL," <<
-						"INDEX(time)" <<
-					")";
-		}
+
 
 		if(mysql_query(dbp, create_str.str().c_str()))
 		{
@@ -1226,13 +1193,196 @@ int HdbMySQL::remove_Attr(string name)
 
 int HdbMySQL::start_Attr(string name)
 {
-	//TODO: implement
+	ostringstream query_str;
+	ostringstream update_event_str;
+	ostringstream insert_event_str;
+	string facility = get_only_tango_host(name);
+	string attr_name = get_only_attr_name(name);
+
+	int id=0;
+	int ret = find_attr_id(facility, attr_name, id);
+	if(ret < 0)
+	{
+		cout<< __func__ << ": ERROR "<<facility<<"/"<<attr_name<<" NOT FOUND" << endl;
+		return -1;
+	}
+
+	query_str <<
+		"SELECT " << AMT_COL_ID << " FROM " << m_dbname << "." << AMT_TABLE_NAME <<
+			" WHERE " << AMT_COL_ID << "=" <<id;
+	if(mysql_query(dbp, query_str.str().c_str()))
+	{
+		cout<< __func__ << ": ERROR in query=" << query_str.str() << " err="<<mysql_error(dbp)<< endl;
+		return -1;
+	}
+	else
+	{
+#ifdef _LIB_DEBUG
+		cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
+#endif
+		MYSQL_RES *res;
+		MYSQL_ROW row;
+		/*res = mysql_use_result(dbp);
+		my_ulonglong num_found = mysql_num_rows(res);
+		if(num_found == 0)*/
+		res = mysql_store_result(dbp);
+		if(res == NULL)
+		{
+			insert_event_str <<
+				"INSERT INTO " << m_dbname << "." << AMT_TABLE_NAME << " ("<<AMT_COL_ID<<","<<AMT_COL_STARTDATE<<")" <<
+					" VALUES ("<<id<<",NOW())";
+
+			if(mysql_query(dbp, insert_event_str.str().c_str()))
+			{
+				cout<< __func__ << ": ERROR in query=" << insert_event_str.str() << endl;
+				return -1;
+			}
+#ifdef _LIB_DEBUG
+			else
+				cout << __func__<< ": SUCCESS in query: " << insert_event_str.str() << endl;
+#endif
+			return 0;
+		}
+		else
+		{
+			my_ulonglong num_found = mysql_num_rows(res);
+#ifdef _LIB_DEBUG
+			cout << __func__<< ": mysql_num_rows="<< num_found <<" in query: " << query_str.str() << endl;
+#endif
+			if(num_found == 0)
+			{
+				insert_event_str <<
+					"INSERT INTO " << m_dbname << "." << AMT_TABLE_NAME << " ("<<AMT_COL_ID<<","<<AMT_COL_STARTDATE<<")" <<
+						" VALUES ("<<id<<",NOW())";
+
+				if(mysql_query(dbp, insert_event_str.str().c_str()))
+				{
+					cout<< __func__ << ": ERROR in query=" << insert_event_str.str() << endl;
+					mysql_free_result(res);
+					return -1;
+				}
+	#ifdef _LIB_DEBUG
+				else
+					cout << __func__<< ": SUCCESS in query: " << insert_event_str.str() << endl;
+	#endif
+				mysql_free_result(res);
+				return 0;
+			}
+		}
+		mysql_free_result(res);
+#if 0	//do nothing if already started once
+		update_event_str <<
+			"UPDATE " << m_dbname << "." << AMT_TABLE_NAME << " SET "<<AMT_COL_STARTDATE<<"=NOW()" <<
+				" WHERE " << AMT_COL_ID << "=" << id;
+
+		if(mysql_query(dbp, update_event_str.str().c_str()))
+		{
+			cout<< __func__ << ": ERROR in query=" << insert_event_str.str() << endl;
+			return -1;
+		}
+#endif
+	}
+
 	return 0;
 }
 
 int HdbMySQL::stop_Attr(string name)
 {
-	//TODO: implement
+	ostringstream query_str;
+	ostringstream update_event_str;
+	ostringstream insert_event_str;
+	string facility = get_only_tango_host(name);
+	string attr_name = get_only_attr_name(name);
+
+	int id=0;
+	int ret = find_attr_id(facility, attr_name, id);
+	if(ret < 0)
+	{
+		cout<< __func__ << ": ERROR "<<facility<<"/"<<attr_name<<" NOT FOUND" << endl;
+		return -1;
+	}
+
+	query_str <<
+		"SELECT " << AMT_COL_ID << " FROM " << m_dbname << "." << AMT_TABLE_NAME <<
+			" WHERE " << AMT_COL_ID << "=" <<id;
+
+	if(mysql_query(dbp, query_str.str().c_str()))
+	{
+		cout<< __func__ << ": ERROR in query=" << query_str.str() << " err="<<mysql_error(dbp)<< endl;
+		return -1;
+	}
+	else
+	{
+#ifdef _LIB_DEBUG
+		cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
+#endif
+		MYSQL_RES *res;
+		MYSQL_ROW row;
+		/*res = mysql_use_result(dbp);
+		my_ulonglong num_found = mysql_num_rows(res);
+		if(num_found == 0)*/
+		res = mysql_store_result(dbp);
+		if(res == NULL)
+		{
+
+			insert_event_str <<
+				"INSERT INTO " << m_dbname << "." << AMT_TABLE_NAME << " ("<<AMT_COL_ID<<","<<AMT_COL_STOPDATE<<")" <<
+					" VALUES ("<<id<<",NOW())";
+
+			if(mysql_query(dbp, insert_event_str.str().c_str()))
+			{
+				cout<< __func__ << ": ERROR in query=" << insert_event_str.str() << endl;
+				return -1;
+			}
+#ifdef _LIB_DEBUG
+			else
+				cout << __func__<< ": SUCCESS in query: " << insert_event_str.str() << endl;
+#endif
+			return 0;
+		}
+		else
+		{
+			my_ulonglong num_found = mysql_num_rows(res);
+#ifdef _LIB_DEBUG
+			cout << __func__<< ": mysql_num_rows="<< num_found <<" in query: " << query_str.str() << endl;
+#endif
+			if(num_found == 0)
+			{
+				insert_event_str <<
+					"INSERT INTO " << m_dbname << "." << AMT_TABLE_NAME << " ("<<AMT_COL_ID<<","<<AMT_COL_STOPDATE<<")" <<
+						" VALUES ("<<id<<",NOW())";
+
+				if(mysql_query(dbp, insert_event_str.str().c_str()))
+				{
+					cout<< __func__ << ": ERROR in query=" << insert_event_str.str() << endl;
+					mysql_free_result(res);
+					return -1;
+				}
+#ifdef _LIB_DEBUG
+				else
+					cout << __func__<< ": SUCCESS in query: " << insert_event_str.str() << endl;
+#endif
+				mysql_free_result(res);
+				return 0;
+			}
+		}
+		mysql_free_result(res);
+
+		update_event_str <<
+			"UPDATE " << m_dbname << "." << AMT_TABLE_NAME << " SET "<<AMT_COL_STOPDATE<<"=NOW()" <<
+				" WHERE " << AMT_COL_ID << "=" << id;
+
+		if(mysql_query(dbp, update_event_str.str().c_str()))
+		{
+			cout<< __func__ << ": ERROR in query=" << update_event_str.str() << endl;
+			return -1;
+		}
+#ifdef _LIB_DEBUG
+		else
+			cout << __func__<< ": SUCCESS in query: " << update_event_str.str() << endl;
+#endif
+	}
+
 	return 0;
 }
 
