@@ -248,7 +248,11 @@ int HdbMySQL::find_attr_id_type(string facility, string attr, int &ID, int data_
 			return -2;
 		}
 		else
+		{
+			cout << __func__<< ": FOUND ID="<<ID<<" with SAME type: data_type="<<data_type<<"-db_data_type="<<db_data_type<<
+					" data_format="<<data_format<<"-db_data_format="<<db_data_format<<" writable="<<writable<<"-db_writable="<<db_writable<< endl;
 			return 0;
+		}
 	}
 	return 0;
 }
@@ -257,7 +261,7 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 {
 	int ret = -1;
 #ifdef _LIB_DEBUG
-//	cout << __func__<< ": entering..." << endl;
+	cout << __func__<< ": entering..." << endl;
 #endif
 	try
 	{
@@ -268,6 +272,25 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 		vector<double>	dval_r;
 		vector<double>	dval_w;
 		Tango::AttributeDimension attr_w_dim = data->attr_value->get_w_dimension();
+		Tango::AttributeDimension attr_r_dim = data->attr_value->get_r_dimension();
+		int data_type = data->attr_value->get_type();
+		//Tango::AttrDataFormat data_format = data->attr_value->get_data_format();	//works if bug 627 fixed
+		Tango::AttrDataFormat data_format = (attr_w_dim.dim_x <= 1 && attr_w_dim.dim_y <= 1 && attr_r_dim.dim_x <= 1 && attr_r_dim.dim_y <= 1) ? \
+				Tango::SCALAR : Tango::SPECTRUM;	//TODO
+		int write_type = (attr_w_dim.dim_x == 0 && attr_w_dim.dim_y == 0) ? Tango::READ : Tango::READ_WRITE;	//TODO
+
+		bool isNull = false;
+		if(data->err || data->attr_value->is_empty() || data->attr_value->get_quality() == Tango::ATTR_INVALID)
+		{
+#ifdef _LIB_DEBUG
+			cout << __func__<< ": going to archive as NULL..." << endl;
+#endif
+			isNull = true;
+		}
+#ifdef _LIB_DEBUG
+		cout << __func__<< ": data_type="<<data_type<<" data_format="<<data_format<<" write_type="<<write_type << endl;
+#endif
+
 
 		switch(data->attr_value->get_type())
 		{
@@ -275,12 +298,16 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 		{
 			
 //			extract values and get only read ones.
-//			if(data->attr_value->get_type() == Tango::READ)	//TODO
-			if(attr_w_dim.dim_x == 0 && attr_w_dim.dim_y == 0)
+			if(write_type == Tango::READ)
 			{
-				if (data->attr_value->extract_read(dval))
+				if(isNull)
 				{
-					ret = store_double_RO(attr_name, dval, time);
+					dval.push_back(0);//fake value
+					ret = store_double_RO(attr_name, dval, time, data_format, isNull);
+				}
+				else if (data->attr_value->extract_read(dval))
+				{
+					ret = store_double_RO(attr_name, dval, time, data_format);
 				}
 				else
 				{
@@ -290,9 +317,15 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 			}
 			else
 			{
-				if(data->attr_value->extract_read(dval_r) && data->attr_value->extract_set(dval_w))
+				if(isNull)
 				{
-					ret = store_double_RW(attr_name, dval_r, dval_w, time);
+					dval_r.push_back(0);//fake value
+					dval_w.push_back(0);//fake value
+					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format, isNull);
+				}
+				else if(data->attr_value->extract_read(dval_r) && data->attr_value->extract_set(dval_w))
+				{
+					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format);
 				}
 				else
 				{
@@ -305,15 +338,19 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 		case Tango::DEV_FLOAT:
 		{
 //			extract values and get only read ones.
-//			if(data->attr_value->get_type() == Tango::READ)	//TODO
-			if(attr_w_dim.dim_x == 0 && attr_w_dim.dim_y == 0)
+			if(write_type == Tango::READ)
 			{
 				vector<float>	fval;
-				if (data->attr_value->extract_read(fval))
+				if(isNull)
+				{
+					dval.push_back(0);//fake value
+					ret = store_double_RO(attr_name, dval, time, data_format, isNull);
+				}
+				else if (data->attr_value->extract_read(fval))
 				{
 					for (unsigned int i=0 ; i<fval.size() ; i++)
 						dval.push_back((double)fval[i]);
-					ret = store_double_RO(attr_name, dval, time);
+					ret = store_double_RO(attr_name, dval, time, data_format);
 				}
 				else
 				{
@@ -325,13 +362,19 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 			{
 				vector<float>	fval_r;
 				vector<float>	fval_w;
-				if(data->attr_value->extract_read(fval_r) && data->attr_value->extract_set(fval_w))
+				if(isNull)
+				{
+					dval_r.push_back(0);//fake value
+					dval_w.push_back(0);//fake value
+					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format, isNull);
+				}
+				else if(data->attr_value->extract_read(fval_r) && data->attr_value->extract_set(fval_w))
 				{
 					for (unsigned int i=0 ; i<fval_r.size() ; i++)
 						dval_r.push_back((double)fval_r[i]);
 					for (unsigned int i=0 ; i<fval_w.size() ; i++)
 						dval_w.push_back((double)fval_w[i]);
-					ret = store_double_RW(attr_name, dval_r, dval_w, time);
+					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format);
 				}
 				else
 				{
@@ -344,15 +387,19 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 		case Tango::DEV_LONG:
 		{
 //			extract values and get only read ones.
-//			if(data->attr_value->get_type() == Tango::READ)	//TODO
-			if(attr_w_dim.dim_x == 0 && attr_w_dim.dim_y == 0)
+			if(write_type == Tango::READ)
 			{
 				vector<Tango::DevLong>	lval;
-				if (data->attr_value->extract_read(lval))
+				if(isNull)
+				{
+					dval.push_back(0);//fake value
+					ret = store_double_RO(attr_name, dval, time, data_format, isNull);
+				}
+				else if (data->attr_value->extract_read(lval))
 				{
 					for (unsigned int i=0 ; i<lval.size() ; i++)
 						dval.push_back((double)lval[i]);
-					ret = store_double_RO(attr_name, dval, time);
+					ret = store_double_RO(attr_name, dval, time, data_format);
 				}
 				else
 				{
@@ -364,13 +411,19 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 			{
 				vector<Tango::DevLong>	lval_r;
 				vector<Tango::DevLong>	lval_w;
-				if(data->attr_value->extract_read(lval_r) && data->attr_value->extract_set(lval_w))
+				if(isNull)
+				{
+					dval_r.push_back(0);//fake value
+					dval_w.push_back(0);//fake value
+					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format, isNull);
+				}
+				else if(data->attr_value->extract_read(lval_r) && data->attr_value->extract_set(lval_w))
 				{
 					for (unsigned int i=0 ; i<lval_r.size() ; i++)
 						dval_r.push_back((double)lval_r[i]);
 					for (unsigned int i=0 ; i<lval_w.size() ; i++)
 						dval_w.push_back((double)lval_w[i]);
-					ret = store_double_RW(attr_name, dval_r, dval_w, time);
+					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format);
 				}
 				else
 				{
@@ -383,15 +436,19 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 		case Tango::DEV_ULONG:
 		{
 //			extract values and get only read ones.
-//			if(data->attr_value->get_type() == Tango::READ)	//TODO
-			if(attr_w_dim.dim_x == 0 && attr_w_dim.dim_y == 0)
+			if(write_type == Tango::READ)
 			{
 				vector<Tango::DevULong>	ulval;
-				if (data->attr_value->extract_read(ulval))
+				if(isNull)
+				{
+					dval.push_back(0);//fake value
+					ret = store_double_RO(attr_name, dval, time, data_format, isNull);
+				}
+				else if (data->attr_value->extract_read(ulval))
 				{
 					for (unsigned int i=0 ; i<ulval.size() ; i++)
 						dval.push_back((double)ulval[i]);
-					ret = store_double_RO(attr_name, dval, time);
+					ret = store_double_RO(attr_name, dval, time, data_format);
 				}
 				else
 				{
@@ -403,13 +460,19 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 			{
 				vector<Tango::DevULong>	ulval_r;
 				vector<Tango::DevULong>	ulval_w;
-				if(data->attr_value->extract_read(ulval_r) && data->attr_value->extract_set(ulval_w))
+				if(isNull)
+				{
+					dval_r.push_back(0);//fake value
+					dval_w.push_back(0);//fake value
+					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format, isNull);
+				}
+				else if(data->attr_value->extract_read(ulval_r) && data->attr_value->extract_set(ulval_w))
 				{
 					for (unsigned int i=0 ; i<ulval_r.size() ; i++)
 						dval_r.push_back((double)ulval_r[i]);
 					for (unsigned int i=0 ; i<ulval_w.size() ; i++)
 						dval_w.push_back((double)ulval_w[i]);
-					ret = store_double_RW(attr_name, dval_r, dval_w, time);
+					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format);
 				}
 				else
 				{
@@ -422,15 +485,19 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 		case Tango::DEV_LONG64:
 		{
 //			extract values and get only read ones.
-//			if(data->attr_value->get_type() == Tango::READ)	//TODO
-			if(attr_w_dim.dim_x == 0 && attr_w_dim.dim_y == 0)
+			if(write_type == Tango::READ)
 			{
 				vector<Tango::DevLong64>	l64val;
-				if (data->attr_value->extract_read(l64val))
+				if(isNull)
+				{
+					dval.push_back(0);//fake value
+					ret = store_double_RO(attr_name, dval, time, data_format, isNull);
+				}
+				else if (data->attr_value->extract_read(l64val))
 				{
 					for (unsigned int i=0 ; i<l64val.size() ; i++)
 						dval.push_back((double)l64val[i]);
-					ret = store_double_RO(attr_name, dval, time);
+					ret = store_double_RO(attr_name, dval, time, data_format);
 				}
 				else
 				{
@@ -442,13 +509,19 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 			{
 				vector<Tango::DevLong64>	l64val_r;
 				vector<Tango::DevLong64>	l64val_w;
-				if(data->attr_value->extract_read(l64val_r) && data->attr_value->extract_set(l64val_w))
+				if(isNull)
+				{
+					dval_r.push_back(0);//fake value
+					dval_w.push_back(0);//fake value
+					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format, isNull);
+				}
+				else if(data->attr_value->extract_read(l64val_r) && data->attr_value->extract_set(l64val_w))
 				{
 					for (unsigned int i=0 ; i<l64val_r.size() ; i++)
 						dval_r.push_back((double)l64val_r[i]);
 					for (unsigned int i=0 ; i<l64val_w.size() ; i++)
 						dval_w.push_back((double)l64val_w[i]);
-					ret = store_double_RW(attr_name, dval_r, dval_w, time);
+					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format);
 				}
 				else
 				{
@@ -461,15 +534,19 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 		case Tango::DEV_ULONG64:
 		{
 //			extract values and get only read ones.
-//			if(data->attr_value->get_type() == Tango::READ)	//TODO
-			if(attr_w_dim.dim_x == 0 && attr_w_dim.dim_y == 0)
+			if(write_type == Tango::READ)
 			{
 				vector<Tango::DevULong64>	ul64val;
-				if (data->attr_value->extract_read(ul64val))
+				if(isNull)
+				{
+					dval.push_back(0);//fake value
+					ret = store_double_RO(attr_name, dval, time, data_format, isNull);
+				}
+				else if (data->attr_value->extract_read(ul64val))
 				{
 					for (unsigned int i=0 ; i<ul64val.size() ; i++)
 						dval.push_back((double)ul64val[i]);
-					ret = store_double_RO(attr_name, dval, time);
+					ret = store_double_RO(attr_name, dval, time, data_format);
 				}
 				else
 				{
@@ -481,13 +558,19 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 			{
 				vector<Tango::DevULong64>	ul64val_r;
 				vector<Tango::DevULong64>	ul64val_w;
-				if(data->attr_value->extract_read(ul64val_r) && data->attr_value->extract_set(ul64val_w))
+				if(isNull)
+				{
+					dval_r.push_back(0);//fake value
+					dval_w.push_back(0);//fake value
+					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format, isNull);
+				}
+				else if(data->attr_value->extract_read(ul64val_r) && data->attr_value->extract_set(ul64val_w))
 				{
 					for (unsigned int i=0 ; i<ul64val_r.size() ; i++)
 						dval_r.push_back((double)ul64val_r[i]);
 					for (unsigned int i=0 ; i<ul64val_w.size() ; i++)
 						dval_w.push_back((double)ul64val_w[i]);
-					ret = store_double_RW(attr_name, dval_r, dval_w, time);
+					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format);
 				}
 				else
 				{
@@ -500,15 +583,19 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 		case Tango::DEV_SHORT:
 		{
 //			extract values and get only read ones.
-//			if(data->attr_value->get_type() == Tango::READ)	//TODO
-			if(attr_w_dim.dim_x == 0 && attr_w_dim.dim_y == 0)
+			if(write_type == Tango::READ)
 			{
 				vector<Tango::DevLong>	lval;
-				if (data->attr_value->extract_read(lval))
+				if(isNull)
+				{
+					dval.push_back(0);//fake value
+					ret = store_double_RO(attr_name, dval, time, data_format, isNull);
+				}
+				else if (data->attr_value->extract_read(lval))
 				{
 					for (unsigned int i=0 ; i<lval.size() ; i++)
 						dval.push_back((double)lval[i]);
-					ret = store_double_RO(attr_name, dval, time);
+					ret = store_double_RO(attr_name, dval, time, data_format);
 				}
 				else
 				{
@@ -520,13 +607,19 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 			{
 				vector<Tango::DevShort>	sval_r;
 				vector<Tango::DevShort>	sval_w;
-				if(data->attr_value->extract_read(sval_r) && data->attr_value->extract_set(sval_w))
+				if(isNull)
+				{
+					dval_r.push_back(0);//fake value
+					dval_w.push_back(0);//fake value
+					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format, isNull);
+				}
+				else if(data->attr_value->extract_read(sval_r) && data->attr_value->extract_set(sval_w))
 				{
 					for (unsigned int i=0 ; i<sval_r.size() ; i++)
 						dval_r.push_back((double)sval_r[i]);
 					for (unsigned int i=0 ; i<sval_w.size() ; i++)
 						dval_w.push_back((double)sval_w[i]);
-					ret = store_double_RW(attr_name, dval_r, dval_w, time);
+					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format);
 				}
 				else
 				{
@@ -539,15 +632,19 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 		case Tango::DEV_USHORT:
 		{
 //			extract values and get only read ones.
-//			if(data->attr_value->get_type() == Tango::READ)	//TODO
-			if(attr_w_dim.dim_x == 0 && attr_w_dim.dim_y == 0)
+			if(write_type == Tango::READ)
 			{
 				vector<Tango::DevUShort>	usval;
-				if (data->attr_value->extract_read(usval))
+				if(isNull)
+				{
+					dval.push_back(0);//fake value
+					ret = store_double_RO(attr_name, dval, time, data_format, isNull);
+				}
+				else if (data->attr_value->extract_read(usval))
 				{
 					for (unsigned int i=0 ; i<usval.size() ; i++)
 						dval.push_back((double)usval[i]);
-					ret = store_double_RO(attr_name, dval, time);
+					ret = store_double_RO(attr_name, dval, time, data_format);
 				}
 				else
 				{
@@ -559,13 +656,19 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 			{
 				vector<Tango::DevUShort>	usval_r;
 				vector<Tango::DevUShort>	usval_w;
-				if(data->attr_value->extract_read(usval_r) && data->attr_value->extract_set(usval_w))
+				if(isNull)
+				{
+					dval_r.push_back(0);//fake value
+					dval_w.push_back(0);//fake value
+					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format, isNull);
+				}
+				else if(data->attr_value->extract_read(usval_r) && data->attr_value->extract_set(usval_w))
 				{
 					for (unsigned int i=0 ; i<usval_r.size() ; i++)
 						dval_r.push_back((double)usval_r[i]);
 					for (unsigned int i=0 ; i<usval_w.size() ; i++)
 						dval_w.push_back((double)usval_w[i]);
-					ret = store_double_RW(attr_name, dval_r, dval_w, time);
+					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format);
 				}
 				else
 				{
@@ -578,15 +681,19 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 		case Tango::DEV_BOOLEAN:
 		{
 //			extract values and get only read ones.
-//			if(data->attr_value->get_type() == Tango::READ)	//TODO
-			if(attr_w_dim.dim_x == 0 && attr_w_dim.dim_y == 0)
+			if(write_type == Tango::READ)
 			{
 				vector<Tango::DevBoolean>	bval;
-				if (data->attr_value->extract_read(bval))
+				if(isNull)
+				{
+					dval.push_back(0);//fake value
+					ret = store_double_RO(attr_name, dval, time, data_format, isNull);
+				}
+				else if (data->attr_value->extract_read(bval))
 				{
 					for (unsigned int i=0 ; i<bval.size() ; i++)
 						dval.push_back((double)bval[i]);
-					ret = store_double_RO(attr_name, dval, time);
+					ret = store_double_RO(attr_name, dval, time, data_format);
 				}
 				else
 				{
@@ -598,13 +705,19 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 			{
 				vector<Tango::DevBoolean>	bval_r;
 				vector<Tango::DevBoolean>	bval_w;
-				if(data->attr_value->extract_read(bval_r) && data->attr_value->extract_set(bval_w))
+				if(isNull)
+				{
+					dval_r.push_back(0);//fake value
+					dval_w.push_back(0);//fake value
+					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format, isNull);
+				}
+				else if(data->attr_value->extract_read(bval_r) && data->attr_value->extract_set(bval_w))
 				{
 					for (unsigned int i=0 ; i<bval_r.size() ; i++)
 						dval_r.push_back((double)bval_r[i]);
 					for (unsigned int i=0 ; i<bval_w.size() ; i++)
 						dval_w.push_back((double)bval_w[i]);
-					ret = store_double_RW(attr_name, dval_r, dval_w, time);
+					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format);
 				}
 				else
 				{
@@ -617,15 +730,19 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 		case Tango::DEV_UCHAR:
 		{
 //			extract values and get only read ones.
-//			if(data->attr_value->get_type() == Tango::READ)	//TODO
-			if(attr_w_dim.dim_x == 0 && attr_w_dim.dim_y == 0)
+			if(write_type == Tango::READ)
 			{
 				vector<Tango::DevUChar>	ucval;
-				if (data->attr_value->extract_read(ucval))
+				if(isNull)
+				{
+					dval.push_back(0);//fake value
+					ret = store_double_RO(attr_name, dval, time, data_format, isNull);
+				}
+				else if (data->attr_value->extract_read(ucval))
 				{
 					for (unsigned int i=0 ; i<ucval.size() ; i++)
 						dval.push_back((double)ucval[i]);
-					ret = store_double_RO(attr_name, dval, time);
+					ret = store_double_RO(attr_name, dval, time, data_format);
 				}
 				else
 				{
@@ -637,13 +754,19 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 			{
 				vector<Tango::DevUChar>	ucval_r;
 				vector<Tango::DevUChar>	ucval_w;
-				if(data->attr_value->extract_read(ucval_r) && data->attr_value->extract_set(ucval_w))
+				if(isNull)
+				{
+					dval_r.push_back(0);//fake value
+					dval_w.push_back(0);//fake value
+					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format, isNull);
+				}
+				else if(data->attr_value->extract_read(ucval_r) && data->attr_value->extract_set(ucval_w))
 				{
 					for (unsigned int i=0 ; i<ucval_r.size() ; i++)
 						dval_r.push_back((double)ucval_r[i]);
 					for (unsigned int i=0 ; i<ucval_w.size() ; i++)
 						dval_w.push_back((double)ucval_w[i]);
-					ret = store_double_RW(attr_name, dval_r, dval_w, time);
+					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format);
 				}
 				else
 				{
@@ -657,13 +780,17 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 		{
 			//TODO
 //			extract values and get only read ones.
-//			if(data->attr_value->get_type() == Tango::READ)	//TODO
-			if(attr_w_dim.dim_x == 0 && attr_w_dim.dim_y == 0)
+			if(write_type == Tango::READ)
 			{
 				vector<string>	ssval;
-				if (data->attr_value->extract_read(ssval))
+				if(isNull)
 				{
-					ret = store_string_RO(attr_name, ssval, time);
+					ssval.push_back(0);//fake value
+					ret = store_string_RO(attr_name, ssval, time, data_format, isNull);
+				}
+				else if (data->attr_value->extract_read(ssval))
+				{
+					ret = store_string_RO(attr_name, ssval, time, data_format);
 				}
 				else
 				{
@@ -675,9 +802,15 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 			{
 				vector<string>	ssval_r;
 				vector<string>	ssval_w;
-				if(data->attr_value->extract_read(ssval_r) && data->attr_value->extract_set(ssval_w))
+				if(isNull)
 				{
-					ret = store_string_RW(attr_name, ssval_r, ssval_w, time);
+					ssval_r.push_back(0);//fake value
+					ssval_w.push_back(0);//fake value
+					ret = store_string_RW(attr_name, ssval_r, ssval_w, time, data_format, isNull);
+				}
+				else if(data->attr_value->extract_read(ssval_r) && data->attr_value->extract_set(ssval_w))
+				{
+					ret = store_string_RW(attr_name, ssval_r, ssval_w, time, data_format);
 				}
 				else
 				{
@@ -689,10 +822,18 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 		}
 		case Tango::DEV_STATE:
 		{
-			Tango::DevState	st;
-			*data->attr_value >> st;
-			dval.push_back((double)st);
-			ret = store_double_RO(attr_name, dval, time);
+			if(isNull)
+			{
+				dval.push_back(0);//fake value
+				ret = store_double_RO(attr_name, dval, time, data_format, isNull);
+			}
+			else
+			{
+				Tango::DevState	st;
+				*data->attr_value >> st;
+				dval.push_back((double)st);
+				ret = store_double_RO(attr_name, dval, time, data_format);
+			}
 			break;
 		}
 		default:
@@ -707,7 +848,7 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 	catch(Tango::DevFailed &e)
 	{
 
-		cout << "Exception on " << data->attr_name << ":" << endl;
+		cout << __func__<<": Exception on " << data->attr_name << ":" << endl;
 		
 		for (unsigned int i=0; i<e.errors.length(); i++)
 		{
@@ -724,7 +865,7 @@ int HdbMySQL::insert_Attr(Tango::EventData *data)
 	return ret;
 }
 
-int HdbMySQL::store_double_RO(string attr, vector<double> value, double time)
+int HdbMySQL::store_double_RO(string attr, vector<double> value, double time, Tango::AttrDataFormat data_format, bool isNull)
 {
 #ifdef _LIB_DEBUG
 //	cout << __func__<< ": entering..." << endl;
@@ -751,122 +892,272 @@ int HdbMySQL::store_double_RO(string attr, vector<double> value, double time)
 
 //#define _NOT_BIND 1
 	  //TODO: concatenate facility and full_name? ... WHERE CONCAT(ADT_COL_FACILITY, ADT_COL_FULL_NAME) IN (...)
-#if _NOT_BIND
-	query_str <<
-		"INSERT INTO " << m_dbname << "." << attr_tbl_name <<
-			" (" << ATT_COL_TIME << ",";
-			if(value.size() > 1)
-				query_str << ATT_COL_DIMX << ",";
-			query_str << ATT_COL_VALUE_RO << ")" <<
-			" VALUES (FROM_UNIXTIME(" << timestamp << "),";
-			if(value.size() > 1)
-				query_str << value.size() << ",'";
-			query_str <<std::scientific<<setprecision(16);
-			for(uint32_t i=0; i<value.size(); i++)
-			{
-				if(!(std::isnan(value[i]) || std::isinf(value[i])) || value.size() > 1)	//TODO: ok nan and inf if spectrum?
-					query_str << value[i];
-				else
-					query_str << "NULL";		//TODO: which MySql supports nan and inf?
-				if(i != value.size()-1)
-					query_str << ", ";
-			}
-			if(value.size() > 1)
-				query_str << "'";
-			query_str << ")";
-
-	if(mysql_query(dbp, query_str.str().c_str()))
+//#if _NOT_BIND
+	if(data_format != Tango::SCALAR)	//array
 	{
-		cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
-		return -1;
+		query_str <<
+			"INSERT INTO " << m_dbname << "." << attr_tbl_name <<
+				" (" << ATT_COL_TIME << ",";
+				if(data_format != Tango::SCALAR)
+					query_str << ATT_COL_DIMX << ",";
+				query_str << ATT_COL_VALUE_RO << ")" <<
+				" VALUES (FROM_UNIXTIME(" << timestamp << "),";
+				if(data_format != Tango::SCALAR)
+					query_str << value.size() << ",'";
+				query_str <<std::scientific<<setprecision(16);
+				for(uint32_t i=0; i<value.size(); i++)
+				{
+					if((!(std::isnan(value[i]) || std::isinf(value[i])) || data_format != Tango::SCALAR)  && !isNull )	//TODO: ok nan and inf if spectrum?
+						query_str << value[i];
+					else
+						query_str << "NULL";		//TODO: MySql supports nan and inf?
+					if(i != value.size()-1)
+						query_str << ", ";
+				}
+				if(data_format != Tango::SCALAR)
+					query_str << "'";
+				query_str << ")";
+
+		if(mysql_query(dbp, query_str.str().c_str()))
+		{
+			cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
+			return -1;
+		}
+		else
+		{
+#ifdef _LIB_DEBUG
+			cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
+#endif
+		}
 	}
 	else
 	{
-#ifdef _LIB_DEBUG
-		cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
-#endif
-	}
-#else
-	query_str <<
-		"INSERT INTO " << m_dbname << "." << attr_tbl_name <<
-			" (" << ATT_COL_TIME << ",";
-			if(value.size() > 1)
-				query_str << ATT_COL_DIMX << ",";
-			query_str << ATT_COL_VALUE_RO << ")" <<
-			" VALUES (FROM_UNIXTIME(" << timestamp << "),";
-			if(value.size() > 1)
-				query_str << value.size() << ",'";
-			//query_str <<std::scientific<<setprecision(16);
-			for(uint32_t i=0; i<value.size(); i++)
-			{
-				//if(!(std::isnan(value[i]) || std::isinf(value[i])) || value.size() > 1)	//TODO: ok nan and inf if spectrum?
+		my_bool		is_null;    /* value nullability */
+		query_str <<
+			"INSERT INTO " << m_dbname << "." << attr_tbl_name <<
+				" (" << ATT_COL_TIME << ",";
+				query_str << ATT_COL_VALUE_RO << ")" <<
+				" VALUES (FROM_UNIXTIME(" << timestamp << "),";
+				//query_str <<std::scientific<<setprecision(16);
 					query_str << "?";
-				//else
-				//	query_str << "NULL";		//TODO: which MySql supports nan and inf?
-				if(i != value.size()-1)
-					query_str << ", ";
-			}
-			if(value.size() > 1)
-				query_str << "'";
-			query_str << ")";
+					if(value.size() < 1 || std::isnan(value[0]) || std::isinf(value[0]) || isNull)	//TODO: MySql supports nan and inf?
+						is_null = 1;
+					else
+						is_null = 1;
+				query_str << ")";
 
-	MYSQL_STMT    *pstmt;
-	MYSQL_BIND    *plog_bind = new MYSQL_BIND[value.size()];
-	int           param_count;
-	pstmt = mysql_stmt_init(dbp);
-	if (!pstmt)
-	{
-		cout << __func__<< ": mysql_stmt_init(), out of memory" << endl;
-	}
-	if (mysql_stmt_prepare(pstmt, query_str.str().c_str(), query_str.str().length()))
-	{
-		cout << __func__<< ": mysql_stmt_prepare(), INSERT failed" << endl;
-	}
+		MYSQL_STMT    *pstmt;
+		MYSQL_BIND    *plog_bind = new MYSQL_BIND[1];
+		//int           param_count;
+		pstmt = mysql_stmt_init(dbp);
+		if (!pstmt)
+		{
+			cout << __func__<< ": mysql_stmt_init(), out of memory" << endl;
+		}
+		if (mysql_stmt_prepare(pstmt, query_str.str().c_str(), query_str.str().length()))
+		{
+			cout << __func__<< ": mysql_stmt_prepare(), INSERT failed" << endl;
+		}
 
-	param_count= mysql_stmt_param_count(pstmt);
-	
-	if (param_count != value.size())
-	{
-		cout << __func__<< ": invalid parameter count returned by MySQL" << endl;
-	}
-	memset(plog_bind, 0, sizeof(MYSQL_BIND)*value.size());
-	for(uint32_t i=0; i<value.size(); i++)
-	{
+		/*param_count= mysql_stmt_param_count(pstmt);
+
+		if (param_count != value.size())
+		{
+			cout << __func__<< ": invalid parameter count returned by MySQL" << endl;
+		}*/
+		memset(plog_bind, 0, sizeof(MYSQL_BIND));
+
 		plog_bind[0].buffer_type= MYSQL_TYPE_DOUBLE;
-		plog_bind[0].buffer= (void *)&value[i];
-		plog_bind[0].is_null= 0;
+		if(value.size() == 1)
+			plog_bind[0].buffer= (void *)&value[0];
+		plog_bind[0].is_null= &is_null;
 		plog_bind[0].length= 0;
-	}
-	
-	if (mysql_stmt_bind_param(pstmt, plog_bind))
-		cout << __func__<< ": mysql_stmt_bind_param() failed" << endl;
 		
-	if (mysql_stmt_execute(pstmt))
-	{
-		cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
+		if (mysql_stmt_bind_param(pstmt, plog_bind))
+			cout << __func__<< ": mysql_stmt_bind_param() failed" << endl;
+
+		if (mysql_stmt_execute(pstmt))
+		{
+			cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
+			delete [] plog_bind;
+			if (mysql_stmt_close(pstmt))
+				cout << __func__<< ": failed while closing the statement" << endl;
+			return -1;
+		}
+		else
+		{
+#ifdef _LIB_DEBUG
+			cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
+#endif
+		}
 		delete [] plog_bind;
+
+	/*	if (paffected_rows != 1)
+			DEBUG_STREAM << "log_srvc: invalid affected rows " << endl;*/
 		if (mysql_stmt_close(pstmt))
 			cout << __func__<< ": failed while closing the statement" << endl;
-		return -1;
 	}
-	else
-	{
-#ifdef _LIB_DEBUG
-		cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
-#endif
-	}
-	delete [] plog_bind;
-
-/*	if (paffected_rows != 1)
-		DEBUG_STREAM << "log_srvc: invalid affected rows " << endl;*/
-	if (mysql_stmt_close(pstmt))
-		cout << __func__<< ": failed while closing the statement" << endl;
-#endif
 
 	return 0;
 }
 
-int HdbMySQL::store_double_RW(string attr, vector<double> value_r, vector<double> value_w, double time)
+int HdbMySQL::store_double_RW(string attr, vector<double> value_r, vector<double> value_w, double time, Tango::AttrDataFormat data_format, bool isNull)
+{
+#ifdef _LIB_DEBUG
+//	cout << __func__<< ": entering..." << endl;
+#endif
+	int ID=-1;
+	string facility = get_only_tango_host(attr);
+	string attr_name = get_only_attr_name(attr);
+	find_attr_id(facility, attr_name, ID);
+	if(ID == -1)
+	{
+
+		cout << __func__<< ": ID not found!" << endl;
+		return -1;
+	}
+
+	ostringstream query_str;
+	char attr_tbl_name[64];
+	sprintf(attr_tbl_name,"%s%05d",ATT_TABLE_NAME,ID);
+	int timestamp = (int)(time);	//TODO
+  //example:
+  //INSERT INTO attr_12345
+  //	(a/b/c/d, e/f/g/h)
+
+
+	if(data_format != Tango::SCALAR)	//array
+	{
+		query_str <<
+			"INSERT INTO " << m_dbname << "." << attr_tbl_name <<
+				" (" << ATT_COL_TIME << ",";
+				if(data_format != Tango::SCALAR)
+					query_str << ATT_COL_DIMX << ",";
+				query_str << ATT_COL_R_VALUE_RW << "," << ATT_COL_W_VALUE_RW << ")" <<
+				" VALUES (FROM_UNIXTIME(" << timestamp << "),";
+				if(data_format != Tango::SCALAR)
+					query_str << value_r.size() << ",'";
+				query_str <<std::scientific<<setprecision(16);
+				for(uint32_t i=0; i<value_r.size(); i++)
+				{
+					if((!(std::isnan(value_r[i]) || std::isinf(value_r[i])) || data_format != Tango::SCALAR) && !isNull)	//TODO: ok nan and inf if spectrum?
+						query_str << value_r[i];
+					else
+						query_str << "NULL";		//TODO: which MySql supports nan and inf?
+					if(i != value_r.size()-1)
+						query_str << ", ";
+				}
+				if(data_format != Tango::SCALAR)
+					query_str << "','";
+				else
+					query_str << ",";
+				for(uint32_t i=0; i<value_w.size(); i++)
+				{
+					if(!(std::isnan(value_w[i]) || std::isinf(value_w[i])) || value_w.size() > 1)	//TODO: ok nan and inf if spectrum?
+						query_str << value_w[i];
+					else
+						query_str << "NULL";		//TODO: which MySql supports nan and inf?
+					if(i != value_w.size()-1)
+						query_str << ", ";
+				}
+				if(data_format != Tango::SCALAR)
+					query_str << "'";
+				query_str << ")";
+
+
+		if(mysql_query(dbp, query_str.str().c_str()))
+		{
+			cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
+			return -1;
+		}
+		else
+		{
+#ifdef _LIB_DEBUG
+			cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
+#endif
+		}
+	}
+	else
+	{
+		my_bool		is_null[2];    /* value nullability */
+		query_str <<
+			"INSERT INTO " << m_dbname << "." << attr_tbl_name <<
+				" (" << ATT_COL_TIME << ",";
+				query_str << ATT_COL_R_VALUE_RW << "," << ATT_COL_W_VALUE_RW << ")" <<
+				" VALUES (FROM_UNIXTIME(" << timestamp << "),";
+				//query_str <<std::scientific<<setprecision(16);
+					query_str << "?,?";
+					if(value_r.size() < 1 || std::isnan(value_r[0]) || std::isinf(value_r[0]) || isNull)	//TODO: MySql supports nan and inf?
+						is_null[0] = 1;
+					else
+						is_null[0] = 0;
+					if(value_w.size() < 1 || std::isnan(value_w[0]) || std::isinf(value_w[0]) || isNull)	//TODO: MySql supports nan and inf?
+						is_null[1] = 1;
+					else
+						is_null[1] = 0;
+				query_str << ")";
+
+		MYSQL_STMT    *pstmt;
+		MYSQL_BIND    *plog_bind = new MYSQL_BIND[2];
+		//int           param_count;
+		pstmt = mysql_stmt_init(dbp);
+		if (!pstmt)
+		{
+			cout << __func__<< ": mysql_stmt_init(), out of memory" << endl;
+		}
+		if (mysql_stmt_prepare(pstmt, query_str.str().c_str(), query_str.str().length()))
+		{
+			cout << __func__<< ": mysql_stmt_prepare(), INSERT failed" << endl;
+		}
+
+		/*param_count= mysql_stmt_param_count(pstmt);
+
+		if (param_count != 2)
+		{
+			cout << __func__<< ": invalid parameter count returned by MySQL" << endl;
+		}*/
+		memset(plog_bind, 0, sizeof(MYSQL_BIND)*2);
+
+		plog_bind[0].buffer_type= MYSQL_TYPE_DOUBLE;
+		if(value_r.size() == 1)
+			plog_bind[0].buffer= (void *)&value_r[0];
+		plog_bind[0].is_null= &is_null[0];
+		plog_bind[0].length= 0;
+
+		plog_bind[1].buffer_type= MYSQL_TYPE_DOUBLE;
+		if(value_w.size() == 1)
+			plog_bind[1].buffer= (void *)&value_w[0];
+		plog_bind[1].is_null= &is_null[1];
+		plog_bind[1].length= 0;
+
+		if (mysql_stmt_bind_param(pstmt, plog_bind))
+			cout << __func__<< ": mysql_stmt_bind_param() failed" << endl;
+
+		if (mysql_stmt_execute(pstmt))
+		{
+			cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
+			delete [] plog_bind;
+			if (mysql_stmt_close(pstmt))
+				cout << __func__<< ": failed while closing the statement" << endl;
+			return -1;
+		}
+		else
+		{
+#ifdef _LIB_DEBUG
+			cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
+#endif
+		}
+		delete [] plog_bind;
+
+	/*	if (paffected_rows != 1)
+			DEBUG_STREAM << "log_srvc: invalid affected rows " << endl;*/
+		if (mysql_stmt_close(pstmt))
+			cout << __func__<< ": failed while closing the statement" << endl;
+	}
+	return 0;
+}
+
+int HdbMySQL::store_string_RO(string attr, vector<string> value, double time, Tango::AttrDataFormat data_format, bool isNull)
 {
 #ifdef _LIB_DEBUG
 //	cout << __func__<< ": entering..." << endl;
@@ -895,88 +1186,11 @@ int HdbMySQL::store_double_RW(string attr, vector<double> value_r, vector<double
   query_str <<
 		"INSERT INTO " << m_dbname << "." << attr_tbl_name <<
 			" (" << ATT_COL_TIME << ",";
-			if(value_r.size() > 1)
-				query_str << ATT_COL_DIMX << ",";
-			query_str << ATT_COL_R_VALUE_RW << "," << ATT_COL_W_VALUE_RW << ")" <<
-			" VALUES (FROM_UNIXTIME(" << timestamp << "),";
-			if(value_r.size() > 1)
-				query_str << value_r.size() << ",'";
-			query_str <<std::scientific<<setprecision(16);
-			for(uint32_t i=0; i<value_r.size(); i++)
-			{
-				if(!(std::isnan(value_r[i]) || std::isinf(value_r[i])) || value_r.size() > 1)	//TODO: ok nan and inf if spectrum?
-					query_str << value_r[i];
-				else
-					query_str << "NULL";		//TODO: which MySql supports nan and inf?
-				if(i != value_r.size()-1)
-					query_str << ", ";
-			}
-			if(value_r.size() > 1)
-				query_str << "','";
-			else
-				query_str << ",";
-			for(uint32_t i=0; i<value_w.size(); i++)
-			{
-				if(!(std::isnan(value_w[i]) || std::isinf(value_w[i])) || value_w.size() > 1)	//TODO: ok nan and inf if spectrum?
-					query_str << value_w[i];
-				else
-					query_str << "NULL";		//TODO: which MySql supports nan and inf?
-				if(i != value_w.size()-1)
-					query_str << ", ";
-			}
-			if(value_r.size() > 1)
-				query_str << "'";
-			query_str << ")";
-
-
-	if(mysql_query(dbp, query_str.str().c_str()))
-	{
-		cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
-		return -1;
-	}
-	else
-	{
-#ifdef _LIB_DEBUG
-		cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
-#endif
-	}
-	return 0;
-}
-
-int HdbMySQL::store_string_RO(string attr, vector<string> value, double time)
-{
-#ifdef _LIB_DEBUG
-//	cout << __func__<< ": entering..." << endl;
-#endif
-	int ID=-1;
-	string facility = get_only_tango_host(attr);
-	string attr_name = get_only_attr_name(attr);
-	find_attr_id(facility, attr_name, ID);
-	if(ID == -1)
-	{
-
-		cout << __func__<< ": ID not found!" << endl;
-		return -1;
-	}
-
-	ostringstream query_str;
-	char attr_tbl_name[64];
-	sprintf(attr_tbl_name,"%s%05d",ATT_TABLE_NAME,ID);
-	int timestamp = (int)(time);	//TODO
-  //example:
-  //INSERT INTO attr_12345
-  //	(a/b/c/d, e/f/g/h)
-
-
-  //TODO: concatenate facility and full_name? ... WHERE CONCAT(ADT_COL_FACILITY, ADT_COL_FULL_NAME) IN (...)
-  query_str <<
-		"INSERT INTO " << m_dbname << "." << attr_tbl_name <<
-			" (" << ATT_COL_TIME << ",";
-			if(value.size() > 1)
+			if(data_format != Tango::SCALAR)
 				query_str << ATT_COL_DIMX << ",";
 			query_str << ATT_COL_VALUE_RO << ")" <<
 			" VALUES (FROM_UNIXTIME(" << timestamp << "),";
-			if(value.size() > 1)
+			if(data_format != Tango::SCALAR)
 				query_str << value.size() << ",";
 			query_str <<std::scientific<<setprecision(16)<<"'";
 			for(uint32_t i=0; i<value.size(); i++)
@@ -1002,7 +1216,7 @@ int HdbMySQL::store_string_RO(string attr, vector<string> value, double time)
 	return 0;
 }
 
-int HdbMySQL::store_string_RW(string attr, vector<string> value_r, vector<string> value_w, double time)
+int HdbMySQL::store_string_RW(string attr, vector<string> value_r, vector<string> value_w, double time, Tango::AttrDataFormat data_format, bool isNull)
 {
 #ifdef _LIB_DEBUG
 //	cout << __func__<< ": entering..." << endl;
@@ -1031,12 +1245,12 @@ int HdbMySQL::store_string_RW(string attr, vector<string> value_r, vector<string
   query_str <<
 		"INSERT INTO " << m_dbname << "." << attr_tbl_name <<
 			" (" << ATT_COL_TIME << ",";
-			if(value_r.size() > 1)
+			if(data_format != Tango::SCALAR)
 				query_str << ATT_COL_DIMX << ",";
 			query_str << ATT_COL_R_VALUE_RW << "," << ATT_COL_W_VALUE_RW << ")" <<
 			" VALUES (FROM_UNIXTIME(" << timestamp << "),";
-			if(value_r.size() > 1)
-				query_str << value_r.size() << ",";
+			if(data_format != Tango::SCALAR)
+				query_str << value_r.size() << ",";		//TODO: max(r,w) size
 			query_str <<std::scientific<<setprecision(16)<<"'";
 			for(uint32_t i=0; i<value_r.size(); i++)
 			{
@@ -1091,8 +1305,10 @@ int HdbMySQL::configure_Attr(string name, int type/*DEV_DOUBLE, DEV_STRING, ..*/
 	}
 	//ID not found: create new table
 	insert_str <<
-		"INSERT INTO " << m_dbname << "." << ADT_TABLE_NAME << " ("<<ADT_COL_FULL_NAME<<","<<ADT_COL_FACILITY<<","<<ADT_COL_TIME<<")" <<
-			" VALUES ('" << attr_name << "','" << facility << "',NOW())";
+		"INSERT INTO " << m_dbname << "." << ADT_TABLE_NAME << " ("<<ADT_COL_FULL_NAME<<","<<ADT_COL_FACILITY<<","<<ADT_COL_TIME<<","<<
+			ADT_COL_DATA_TYPE<<","<<ADT_COL_DATA_FORMAT<<","<<ADT_COL_WRITABLE<<")" <<
+			" VALUES ('" << attr_name << "','" << facility << "',NOW(),"<<
+				type<<","<<format<<","<<write_type<<")";
 
 	if(mysql_query(dbp, insert_str.str().c_str()))
 	{

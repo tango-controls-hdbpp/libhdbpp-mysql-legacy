@@ -93,10 +93,10 @@ private:
 	map<string,int> attr_ID_map;
 	
 
-	int store_double_RO(string attr, vector<double> value, double time);
-	int store_double_RW(string attr, vector<double> value_r, vector<double> value_W, double time);
-	int store_string_RO(string attr, vector<string> value, double time);
-	int store_string_RW(string attr, vector<string> value_r, vector<string> value_w, double time);
+	int store_double_RO(string attr, vector<double> value, double time, Tango::AttrDataFormat data_format, bool isNull=false);
+	int store_double_RW(string attr, vector<double> value_r, vector<double> value_W, double time, Tango::AttrDataFormat data_format, bool isNull=false);
+	int store_string_RO(string attr, vector<string> value, double time, Tango::AttrDataFormat data_format, bool isNull=false);
+	int store_string_RW(string attr, vector<string> value_r, vector<string> value_w, double time, Tango::AttrDataFormat data_format, bool isNull=false);
 	
 	string get_only_attr_name(string str);
 	string get_only_tango_host(string str);
