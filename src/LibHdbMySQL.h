@@ -114,7 +114,7 @@ public:
 
 	int find_attr_id(string facility, string attr_name, int &ID);
 	int find_attr_id_type(string facility, string attr_name, int &ID, int data_type, int data_format, int writable);
-	virtual int insert_Attr(Tango::EventData *data);
+	virtual int insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type);
 	virtual int configure_Attr(string name, int type/*DEV_DOUBLE, DEV_STRING, ..*/, int format/*SCALAR, SPECTRUM, ..*/, int write_type/*READ, READ_WRITE, ..*/);
 	virtual int remove_Attr(string name);
 	virtual int start_Attr(string name);
