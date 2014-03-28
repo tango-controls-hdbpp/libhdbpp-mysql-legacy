@@ -48,7 +48,7 @@
 const char version_string[] = "$Build: " LIB_BUILDTIME " $";
 static const char __FILE__rev[] = __FILE__ " $Revision: 1.6 $";
 
-#define _LIB_DEBUG
+//#define _LIB_DEBUG
 
 HdbMySQL::HdbMySQL(string host, string user, string password, string dbname, int port)
 {
@@ -232,14 +232,18 @@ int HdbMySQL::find_attr_id_type(string facility, string attr, int &ID, int data_
 			}
 		}
 #endif
+		bool found = false;
 		while ((row = mysql_fetch_row(res)))
 		{
+			found = true;
 			ID = atoi(row[0]);
 			db_data_type = atoi(row[1]);
 			db_data_format = atoi(row[2]);
 			db_writable = atoi(row[3]);
 		}
 		mysql_free_result(res);
+		if(!found)
+			return -1;
 
 		if(get_attr_type(data_type, data_format, writable) != get_attr_type(db_data_type, db_data_format, db_writable))
 		{
