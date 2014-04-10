@@ -1160,7 +1160,7 @@ int HdbMySQL::store_double_RW(string attr, vector<double> value_r, vector<double
 				query_str <<std::scientific<<setprecision(16);
 				for(uint32_t i=0; i<max_size; i++)
 				{
-					if((!(std::isnan(value_r[i]) || std::isinf(value_r[i])) || data_format != Tango::SCALAR) && i<value_r.size() && !isNull)	//TODO: ok nan and inf if spectrum?
+					if(i<value_r.size() && (!(std::isnan(value_r[i]) || std::isinf(value_r[i])) || data_format != Tango::SCALAR) && !isNull)	//TODO: ok nan and inf if spectrum?
 						query_str << value_r[i];
 					else
 						query_str << "NULL";		//TODO: which MySql supports nan and inf?
@@ -1173,7 +1173,7 @@ int HdbMySQL::store_double_RW(string attr, vector<double> value_r, vector<double
 					query_str << ",";
 				for(uint32_t i=0; i<max_size; i++)
 				{
-					if((!(std::isnan(value_w[i]) || std::isinf(value_w[i])) ||  data_format != Tango::SCALAR) && i<value_w.size() && !isNull)	//TODO: ok nan and inf if spectrum?
+					if(i<value_w.size() && (!(std::isnan(value_w[i]) || std::isinf(value_w[i])) ||  data_format != Tango::SCALAR) && !isNull)	//TODO: ok nan and inf if spectrum?
 						query_str << value_w[i];
 					else
 						query_str << "NULL";		//TODO: which MySql supports nan and inf?
