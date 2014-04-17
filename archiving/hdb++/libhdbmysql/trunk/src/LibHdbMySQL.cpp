@@ -1529,8 +1529,6 @@ int HdbMySQL::remove_Attr(string name)
 
 int HdbMySQL::start_Attr(string name)
 {
-	ostringstream query_str;
-	ostringstream update_event_str;
 	ostringstream insert_event_str;
 	string facility = get_only_tango_host(name);
 	string attr_name = get_only_attr_name(name);
@@ -1543,82 +1541,19 @@ int HdbMySQL::start_Attr(string name)
 		return -1;
 	}
 
-	query_str <<
-		"SELECT " << AMT_COL_ID << " FROM " << m_dbname << "." << AMT_TABLE_NAME <<
-			" WHERE " << AMT_COL_ID << "=" <<id;
-	if(mysql_query(dbp, query_str.str().c_str()))
+	insert_event_str <<
+		"INSERT INTO " << m_dbname << "." << AMT_TABLE_NAME << " ("<<AMT_COL_ID<<","<<AMT_COL_STARTDATE<<")" <<
+			" VALUES ("<<id<<",NOW())";
+
+	if(mysql_query(dbp, insert_event_str.str().c_str()))
 	{
-		cout<< __func__ << ": ERROR in query=" << query_str.str() << " err="<<mysql_error(dbp)<< endl;
+		cout<< __func__ << ": ERROR in query=" << insert_event_str.str() << endl;
 		return -1;
 	}
+#ifdef _LIB_DEBUG
 	else
-	{
-#ifdef _LIB_DEBUG
-		cout << __func__<< ": SUCCESS in query: " << query_str.str() << endl;
+		cout << __func__<< ": SUCCESS in query: " << insert_event_str.str() << endl;
 #endif
-		MYSQL_RES *res;
-		MYSQL_ROW row;
-		/*res = mysql_use_result(dbp);
-		my_ulonglong num_found = mysql_num_rows(res);
-		if(num_found == 0)*/
-		res = mysql_store_result(dbp);
-		if(res == NULL)
-		{
-			insert_event_str <<
-				"INSERT INTO " << m_dbname << "." << AMT_TABLE_NAME << " ("<<AMT_COL_ID<<","<<AMT_COL_STARTDATE<<")" <<
-					" VALUES ("<<id<<",NOW())";
-
-			if(mysql_query(dbp, insert_event_str.str().c_str()))
-			{
-				cout<< __func__ << ": ERROR in query=" << insert_event_str.str() << endl;
-				return -1;
-			}
-#ifdef _LIB_DEBUG
-			else
-				cout << __func__<< ": SUCCESS in query: " << insert_event_str.str() << endl;
-#endif
-			return 0;
-		}
-		else
-		{
-			my_ulonglong num_found = mysql_num_rows(res);
-#ifdef _LIB_DEBUG
-			cout << __func__<< ": mysql_num_rows="<< num_found <<" in query: " << query_str.str() << endl;
-#endif
-			if(num_found == 0)
-			{
-				insert_event_str <<
-					"INSERT INTO " << m_dbname << "." << AMT_TABLE_NAME << " ("<<AMT_COL_ID<<","<<AMT_COL_STARTDATE<<")" <<
-						" VALUES ("<<id<<",NOW())";
-
-				if(mysql_query(dbp, insert_event_str.str().c_str()))
-				{
-					cout<< __func__ << ": ERROR in query=" << insert_event_str.str() << endl;
-					mysql_free_result(res);
-					return -1;
-				}
-	#ifdef _LIB_DEBUG
-				else
-					cout << __func__<< ": SUCCESS in query: " << insert_event_str.str() << endl;
-	#endif
-				mysql_free_result(res);
-				return 0;
-			}
-		}
-		mysql_free_result(res);
-#if 0	//do nothing if already started once
-		update_event_str <<
-			"UPDATE " << m_dbname << "." << AMT_TABLE_NAME << " SET "<<AMT_COL_STARTDATE<<"=NOW()" <<
-				" WHERE " << AMT_COL_ID << "=" << id;
-
-		if(mysql_query(dbp, update_event_str.str().c_str()))
-		{
-			cout<< __func__ << ": ERROR in query=" << insert_event_str.str() << endl;
-			return -1;
-		}
-#endif
-	}
-
 	return 0;
 }
 
@@ -1639,8 +1574,8 @@ int HdbMySQL::stop_Attr(string name)
 	}
 
 	query_str <<
-		"SELECT " << AMT_COL_ID << " FROM " << m_dbname << "." << AMT_TABLE_NAME <<
-			" WHERE " << AMT_COL_ID << "=" <<id;
+		"SELECT " << AMT_COL_ID << "," << AMT_COL_STARTDATE << " FROM " << m_dbname << "." << AMT_TABLE_NAME <<
+			" WHERE " << AMT_COL_ID << "=" <<id << " ORDER BY " << AMT_COL_STARTDATE << " DESC LIMIT 1";
 
 	if(mysql_query(dbp, query_str.str().c_str()))
 	{
@@ -1702,21 +1637,24 @@ int HdbMySQL::stop_Attr(string name)
 				return 0;
 			}
 		}
-		mysql_free_result(res);
-
-		update_event_str <<
-			"UPDATE " << m_dbname << "." << AMT_TABLE_NAME << " SET "<<AMT_COL_STOPDATE<<"=NOW()" <<
-				" WHERE " << AMT_COL_ID << "=" << id;
-
-		if(mysql_query(dbp, update_event_str.str().c_str()))
+		if ((row = mysql_fetch_row(res)))
 		{
-			cout<< __func__ << ": ERROR in query=" << update_event_str.str() << endl;
-			return -1;
-		}
+			update_event_str <<
+				"UPDATE " << m_dbname << "." << AMT_TABLE_NAME << " SET "<<AMT_COL_STOPDATE<<"=NOW()" <<
+					" WHERE " << AMT_COL_ID << "=" << id << " AND " << AMT_COL_STARTDATE << "='" << row[1] << "'";
+
+			if(mysql_query(dbp, update_event_str.str().c_str()))
+			{
+				cout<< __func__ << ": ERROR in query=" << update_event_str.str() << endl;
+				mysql_free_result(res);
+				return -1;
+			}
 #ifdef _LIB_DEBUG
-		else
-			cout << __func__<< ": SUCCESS in query: " << update_event_str.str() << endl;
+			else
+				cout << __func__<< ": SUCCESS in query: " << update_event_str.str() << endl;
 #endif
+		}
+		mysql_free_result(res);
 	}
 
 	return 0;
