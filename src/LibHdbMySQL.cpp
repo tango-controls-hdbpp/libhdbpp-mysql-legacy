@@ -144,11 +144,15 @@ int HdbMySQL::find_attr_id(string facility, string attr, int &ID)
 			}
 		}
 #endif
+		bool found = false;
 		while ((row = mysql_fetch_row(res)))
 		{
+			found = true;
 			ID = atoi(row[0]);
 		}	
 		mysql_free_result(res);
+		if(!found)
+			return -1;
 		if(ID != -1)
 		{
 			attr_ID_map.insert(make_pair(complete_name,ID));
