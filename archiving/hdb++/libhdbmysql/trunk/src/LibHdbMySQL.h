@@ -101,6 +101,9 @@ private:
 	string get_only_attr_name(string str);
 	string get_only_tango_host(string str);
 	string remove_domain(string facility);
+#ifdef _MULTI_TANGO_HOST
+	void string_explode(string str, string separator, vector<string>* results);
+#endif
 
 	Attr_Type get_attr_type(int data_type, int data_format, int writable);
 

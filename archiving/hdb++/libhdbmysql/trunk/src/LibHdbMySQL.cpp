@@ -103,12 +103,39 @@ int HdbMySQL::find_attr_id(string facility, string attr, int &ID)
 	ostringstream query_str;
 	string facility_no_domain = remove_domain(facility);
 
-
+#ifndef _MULTI_TANGO_HOST
 	//TODO: concatenate facility and full_name? ... WHERE CONCAT(ADT_COL_FACILITY, ADT_COL_FULL_NAME) IN (...)
 	query_str << 
 		"SELECT " << ADT_COL_ID << " FROM " << m_dbname << "." << ADT_TABLE_NAME <<
 			" WHERE LOWER(" << ADT_COL_FULL_NAME << ")='" <<attr << "' AND LOWER(" <<
 				ADT_COL_FACILITY << ") IN ('" << facility << "','" << facility_no_domain << "')";
+#else
+	vector<string> facilities;
+	string_explode(facility,",",&facilities);
+	vector<string> facilities_nd;
+	string_explode(facility_no_domain,",",&facilities_nd);
+
+	int db_data_type, db_data_format, db_writable;
+
+	//TODO: concatenate facility and full_name? ... WHERE CONCAT(ADT_COL_FACILITY, ADT_COL_FULL_NAME) IN (...)
+	query_str << 
+		"SELECT " << ADT_COL_ID << " FROM " << m_dbname << "." << ADT_TABLE_NAME <<
+			" WHERE LOWER(" << ADT_COL_FULL_NAME << ")='" <<attr << "' AND (";
+	for(vector<string>::iterator it = facilities.begin(); it != facilities.end(); it++)
+	{
+		query_str << "LOWER(" << ADT_COL_FACILITY << ") LIKE '%" << *it << "%'";
+		if(it != facilities.end() - 1)
+			query_str << " OR ";
+	}
+	query_str << " OR ";
+	for(vector<string>::iterator it = facilities_nd.begin(); it != facilities_nd.end(); it++)
+	{
+		query_str << "LOWER(" << ADT_COL_FACILITY << ") LIKE '%" << *it << "%'";
+		if(it != facilities_nd.end() - 1)
+			query_str << " OR ";
+	}
+	query_str << ")";
+#endif
 	
 	if(mysql_query(dbp, query_str.str().c_str()))
 	{
@@ -193,6 +220,7 @@ int HdbMySQL::find_attr_id_type(string facility, string attr, int &ID, int data_
 {
 	ostringstream query_str;
 	string facility_no_domain = remove_domain(facility);
+#ifndef _MULTI_TANGO_HOST
 	int db_data_type, db_data_format, db_writable;
 
 	//TODO: concatenate facility and full_name? ... WHERE CONCAT(ADT_COL_FACILITY, ADT_COL_FULL_NAME) IN (...)
@@ -201,7 +229,35 @@ int HdbMySQL::find_attr_id_type(string facility, string attr, int &ID, int data_
 			" FROM " << m_dbname << "." << ADT_TABLE_NAME <<
 			" WHERE LOWER(" << ADT_COL_FULL_NAME << ")='" <<attr << "' AND LOWER(" << 
 				ADT_COL_FACILITY << ") IN ('" << facility << "','" << facility_no_domain << "')";
-	
+#else
+	vector<string> facilities;
+	string_explode(facility,",",&facilities);
+	vector<string> facilities_nd;
+	string_explode(facility_no_domain,",",&facilities_nd);
+
+	int db_data_type, db_data_format, db_writable;
+
+	//TODO: concatenate facility and full_name? ... WHERE CONCAT(ADT_COL_FACILITY, ADT_COL_FULL_NAME) IN (...)
+	query_str << 
+		"SELECT " << ADT_COL_ID << "," << ADT_COL_DATA_TYPE << "," << ADT_COL_DATA_FORMAT << "," << ADT_COL_WRITABLE <<
+			" FROM " << m_dbname << "." << ADT_TABLE_NAME <<
+			" WHERE LOWER(" << ADT_COL_FULL_NAME << ")='" <<attr << "' AND (";
+	for(vector<string>::iterator it = facilities.begin(); it != facilities.end(); it++)
+	{
+		query_str << "LOWER(" << ADT_COL_FACILITY << ") LIKE '%" << *it << "%'";
+		if(it != facilities.end() - 1)
+			query_str << " OR ";
+	}
+	query_str << " OR ";
+	for(vector<string>::iterator it = facilities_nd.begin(); it != facilities_nd.end(); it++)
+	{
+		query_str << "LOWER(" << ADT_COL_FACILITY << ") LIKE '%" << *it << "%'";
+		if(it != facilities_nd.end() - 1)
+			query_str << " OR ";
+	}
+	query_str << ")";
+#endif
+
 	if(mysql_query(dbp, query_str.str().c_str()))
 	{
 		cout<< __func__ << ": ERROR in query=" << query_str.str() << " err="<<mysql_error(dbp)<< endl;
@@ -1699,6 +1755,7 @@ string HdbMySQL::get_only_tango_host(string str)
 
 //=============================================================================
 //=============================================================================
+#ifndef _MULTI_TANGO_HOST
 string HdbMySQL::remove_domain(string str)
 {
 	string::size_type	end1 = str.find(".");
@@ -1725,6 +1782,77 @@ string HdbMySQL::remove_domain(string str)
 		return th;
 	}
 }
+#else
+string HdbMySQL::remove_domain(string str)
+{
+	string result="";
+	string facility(str);
+	vector<string> facilities;
+	if(str.find(",") == string::npos)
+	{
+		facilities.push_back(facility);
+	}
+	else
+	{
+		string_explode(facility,",",&facilities);
+	}
+	for(vector<string>::iterator it = facilities.begin(); it != facilities.end(); it++)
+	{
+		string::size_type	end1 = it->find(".");
+		if (end1 == string::npos)
+		{
+			result += *it;
+			if(it != facilities.end()-1)
+				result += ",";
+			continue;
+		}
+		else
+		{
+			string::size_type	start = it->find("tango://");
+			if (start == string::npos)
+			{
+				start = 0;
+			}
+			else
+			{
+				start = 8;	//tango:// len
+			}
+			string::size_type	end2 = it->find(":", start);
+			if(end1 > end2)	//'.' not in the tango host part
+			{
+				result += *it;
+				if(it != facilities.end()-1)
+					result += ",";
+				continue;
+			}
+			string th = it->substr(0, end1);
+			th += it->substr(end2, it->size()-end2);
+			result += th;
+			if(it != facilities.end()-1)
+				result += ",";
+			continue;
+		}
+	}
+	return result;
+}
+
+void HdbMySQL::string_explode(string str, string separator, vector<string>* results)
+{
+	string::size_type found;
+
+	found = str.find_first_of(separator);
+	while(found != string::npos) {
+		if(found > 0) {
+			results->push_back(str.substr(0,found));
+		}
+		str = str.substr(found+1);
+		found = str.find_first_of(separator);
+	}
+	if(str.length() > 0) {
+		results->push_back(str);
+	}
+}
+#endif
 
 AbstractDB* HdbMySQLFactory::create_db(string host, string user, string password, string dbname, int port)
 {
