@@ -194,7 +194,7 @@ Attr_Type HdbMySQL::get_attr_type(int data_type, int data_format, int writable)
 	{
 		return scalar_double_ro;
 	}
-	else if(data_type != Tango::DEV_STRING && data_format == Tango::SCALAR && writable == Tango::READ_WRITE)
+	else if(data_type != Tango::DEV_STRING && data_format == Tango::SCALAR && (writable == Tango::READ_WRITE || writable == Tango::WRITE ))
 	{
 		return scalar_double_rw;
 	}
@@ -202,7 +202,7 @@ Attr_Type HdbMySQL::get_attr_type(int data_type, int data_format, int writable)
 	{
 		return array_double_ro;
 	}
-	else if(data_type != Tango::DEV_STRING && data_format == Tango::SPECTRUM && writable == Tango::READ_WRITE)
+	else if(data_type != Tango::DEV_STRING && data_format == Tango::SPECTRUM && (writable == Tango::READ_WRITE || writable == Tango::WRITE))
 	{
 		return array_double_rw;
 	}
@@ -1259,6 +1259,9 @@ int HdbMySQL::store_double_RW(string attr, vector<double> value_r, vector<double
 	}
 	else
 	{
+#ifdef _LIB_DEBUG
+		cout << __func__<< ": value_r.size()="<<value_r.size()<<" value_w.size()="<<value_w.size() << endl;
+#endif
 		my_bool		is_null[2];    /* value nullability */
 		query_str <<
 			"INSERT INTO " << m_dbname << "." << attr_tbl_name <<
@@ -1284,10 +1287,16 @@ int HdbMySQL::store_double_RW(string attr, vector<double> value_r, vector<double
 		if (!pstmt)
 		{
 			cout << __func__<< ": mysql_stmt_init(), out of memory" << endl;
+			delete [] plog_bind;
+			return -1;
 		}
 		if (mysql_stmt_prepare(pstmt, query_str.str().c_str(), query_str.str().length()))
 		{
-			cout << __func__<< ": mysql_stmt_prepare(), INSERT failed" << endl;
+			cout << __func__<< ": mysql_stmt_prepare(), INSERT failed query='" << query_str.str() << "' err="<< mysql_stmt_error(pstmt)<< endl;
+			delete [] plog_bind;
+			if (mysql_stmt_close(pstmt))
+				cout << __func__<< ": failed while closing the statement" << endl;
+			return -1;
 		}
 
 		/*param_count= mysql_stmt_param_count(pstmt);
@@ -1311,7 +1320,13 @@ int HdbMySQL::store_double_RW(string attr, vector<double> value_r, vector<double
 		plog_bind[1].length= 0;
 
 		if (mysql_stmt_bind_param(pstmt, plog_bind))
-			cout << __func__<< ": mysql_stmt_bind_param() failed" << endl;
+		{
+			cout << __func__<< ": mysql_stmt_bind_param() failed query='" << query_str.str() << "'" << endl;
+			delete [] plog_bind;
+			if (mysql_stmt_close(pstmt))
+				cout << __func__<< ": failed while closing the statement" << endl;
+			return -1;
+		}
 
 		if (mysql_stmt_execute(pstmt))
 		{
