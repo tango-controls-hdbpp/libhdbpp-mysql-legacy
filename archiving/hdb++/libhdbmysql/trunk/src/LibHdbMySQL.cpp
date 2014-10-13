@@ -354,6 +354,7 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 #endif
 
 		bool isNull = false;
+		data->attr_value->reset_exceptions(Tango::DeviceAttribute::isempty_flag); //disable is_empty exception
 		if(data->err || data->attr_value->is_empty() || data->attr_value->get_quality() == Tango::ATTR_INVALID)
 		{
 #ifdef _LIB_DEBUG
@@ -365,19 +366,15 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 		cout << __func__<< ": data_type="<<data_type<<" data_format="<<data_format<<" write_type="<<write_type << " max_dim_x="<<max_dim_x<<" max_dim_y="<<max_dim_y<< endl;
 #endif
 
-		if(!isNull)
+		/*if(!isNull)
 		{
 			time = data->attr_value->get_date().tv_sec + (double)data->attr_value->get_date().tv_usec/1.0e6;		//event time
-#ifdef _LIB_DEBUG
-//			Tango::AttributeDimension attr_w_dim = data->attr_value->get_w_dimension();
-//			Tango::AttributeDimension attr_r_dim = data->attr_value->get_r_dimension();
-//			cout << __func__<< ": r_dim_x="<<attr_r_dim.dim_x<<" r_dim_y="<<attr_r_dim.dim_y<<" w_dim_x="<<attr_w_dim.dim_x << " w_dim_y="<<attr_w_dim.dim_y<< endl;
-#endif
 		}
 		else
 		{
 			time = data->get_date().tv_sec + (double)data->get_date().tv_usec/1.0e6;	//receive time
-		}
+		}*/
+		time = data->attr_value->get_date().tv_sec + (double)data->attr_value->get_date().tv_usec/1.0e6;		//event time
 
 
 		switch(data_type)
