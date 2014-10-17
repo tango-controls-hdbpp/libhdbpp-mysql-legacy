@@ -1042,6 +1042,13 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 	return ret;
 }
 
+int HdbMySQL::insert_param_Attr(Tango::AttrConfEventData *data, HdbEventDataType ev_data_type)
+{
+	int ret = -1;
+	//TODO
+	return ret;
+}
+
 int HdbMySQL::store_double_RO(string attr, vector<double> value, double time, Tango::AttrDataFormat data_format, bool isNull)
 {
 #ifdef _LIB_DEBUG
