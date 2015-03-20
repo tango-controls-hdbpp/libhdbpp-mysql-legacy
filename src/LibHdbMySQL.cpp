@@ -1590,8 +1590,18 @@ int HdbMySQL::configure_Attr(string name, int type/*DEV_DOUBLE, DEV_STRING, ..*/
 			}
 			break;
 			default:
+			{
 				cout << __func__ << ": attribute type not supported: data_type="<< type << " data_format=" << format << " writable=" << write_type << endl;
+				create_str <<
+						"DELETE FROM " << m_dbname << "." << ADT_TABLE_NAME << " WHERE "<<
+							ADT_COL_FULL_NAME <<"='" << attr_name << "' AND "<<ADT_COL_ID<<"="<<last_id;
+				if(mysql_query(dbp, create_str.str().c_str()))
+				{
+					cout<< __func__ << ": ERROR in query=" << create_str.str() << endl;
+					return -1;
+				}
 				return -1;
+			}
 		}
 
 
