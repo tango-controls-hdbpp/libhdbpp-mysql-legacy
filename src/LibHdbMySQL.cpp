@@ -1753,6 +1753,12 @@ int HdbMySQL::stop_Attr(string name)
 	return 0;
 }
 
+int HdbMySQL::pause_Attr(string name)
+{
+	//TODO
+	return 0;
+}
+
 string HdbMySQL::get_only_attr_name(string str)
 {
 	string::size_type	start = str.find("tango://");
