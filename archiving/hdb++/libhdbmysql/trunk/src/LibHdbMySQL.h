@@ -123,6 +123,7 @@ public:
 	virtual int remove_Attr(string name);
 	virtual int start_Attr(string name);
 	virtual int stop_Attr(string name);
+	virtual int pause_Attr(string name);
 };
 
 class HdbMySQLFactory : public DBFactory
