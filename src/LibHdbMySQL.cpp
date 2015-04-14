@@ -1614,6 +1614,35 @@ int HdbMySQL::configure_Attr(string name, int type/*DEV_DOUBLE, DEV_STRING, ..*/
 	}
 }
 
+int HdbMySQL::event_Attr(string name, unsigned char event)
+{
+	switch(event)
+	{
+		case DB_REMOVE:
+		{
+			return remove_Attr(name);
+		}
+		case DB_START:
+		{
+			return start_Attr(name);
+		}
+		case DB_STOP:
+		{
+			return stop_Attr(name);
+		}
+		case DB_PAUSE:
+		{
+			return pause_Attr(name);
+		}
+		default:
+		{
+			cout<< __func__ << ": ERROR for " << name << " event=" << (int)event << " NOT SUPPORTED" << endl;
+			return -1;
+		}
+	}
+	return -1;
+}
+
 int HdbMySQL::remove_Attr(string name)
 {
 	//TODO: implement

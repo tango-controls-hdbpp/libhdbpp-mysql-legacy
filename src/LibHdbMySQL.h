@@ -107,6 +107,11 @@ private:
 
 	Attr_Type get_attr_type(int data_type, int data_format, int writable);
 
+	int remove_Attr(string name);
+	int start_Attr(string name);
+	int stop_Attr(string name);
+	int pause_Attr(string name);
+
 public:
 
 	~HdbMySQL();
@@ -120,10 +125,7 @@ public:
 	virtual int insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type);
 	virtual int insert_param_Attr(Tango::AttrConfEventData *data, HdbEventDataType ev_data_type);
 	virtual int configure_Attr(string name, int type/*DEV_DOUBLE, DEV_STRING, ..*/, int format/*SCALAR, SPECTRUM, ..*/, int write_type/*READ, READ_WRITE, ..*/);
-	virtual int remove_Attr(string name);
-	virtual int start_Attr(string name);
-	virtual int stop_Attr(string name);
-	virtual int pause_Attr(string name);
+	virtual int event_Attr(string name, unsigned char event);
 };
 
 class HdbMySQLFactory : public DBFactory
