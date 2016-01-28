@@ -1088,7 +1088,7 @@ int HdbMySQL::store_double_RO(string attr, vector<double> value, double time, Ta
 				" VALUES (FROM_UNIXTIME(" << timestamp << "),";
 				if(data_format != Tango::SCALAR)
 					query_str << value.size() << ",'";
-				query_str <<std::scientific<<setprecision(16);
+				query_str <<std::scientific<<setprecision(16);// TODO:  query_str << std::setprecision(std::numeric_limits<FloatingPointType>::digits10+1);
 				for(uint32_t i=0; i<value.size(); i++)
 				{
 					if((!(std::isnan(value[i]) || std::isinf(value[i])) || data_format != Tango::SCALAR)  && !isNull )	//TODO: ok nan and inf if spectrum?
