@@ -41,6 +41,11 @@
 #include <iomanip>
 #include <cmath>
 
+#define MYSQL_ERROR		"Mysql Error"
+#define CONFIG_ERROR	"Configuration Error"
+#define QUERY_ERROR		"Query Error"
+#define DATA_ERROR		"Data Error"
+
 #ifndef LIB_BUILDTIME
 #define LIB_BUILDTIME   RELEASE " " __DATE__ " "  __TIME__
 #endif
@@ -50,14 +55,16 @@ static const char __FILE__rev[] = __FILE__ " $Id: 1.6 $";
 
 //#define _LIB_DEBUG
 
-HdbMySQL::HdbMySQL(string host, string user, string password, string dbname, int port)
+HdbMySQL::HdbMySQL(vector<string> configuration)
 {
-	m_dbname = dbname;
 	dbp = new MYSQL();
 	if(!mysql_init(dbp))
 	{
+		stringstream tmp;
 		cout << __func__<<": VERSION: " << version_string << " file:" << __FILE__rev << endl;
-		cout << __func__<< ": mysql init db error: "<< mysql_error(dbp) << endl;
+		tmp << "mysql init db error: "<< mysql_error(dbp);
+		cout << __func__<< ": " << tmp.str() << endl;
+		Tango::Except::throw_exception(MYSQL_ERROR,tmp.str(),__func__);
 	}
 	my_bool my_auto_reconnect=1;
 	if(mysql_options(dbp,MYSQL_OPT_RECONNECT,&my_auto_reconnect) !=0)
@@ -66,10 +73,32 @@ HdbMySQL::HdbMySQL(string host, string user, string password, string dbname, int
 	}
 
 
-
+	map<string,string> db_conf;
+	string_vector2map(configuration,"=",&db_conf);
+	string host, user, password, dbname;
+	int port;
+	try
+	{
+		host = db_conf["host"];
+		user = db_conf["user"];
+		password = db_conf["password"];
+		dbname = db_conf["dbname"];
+		m_dbname = dbname;
+		port = atoi(db_conf["port"].c_str());
+	}
+	catch(const std::out_of_range& e)
+	{
+		stringstream tmp;
+		tmp << "Configuration parsing error: " << e.what();
+		cout << __func__<< ": " << tmp.str() << endl;
+		Tango::Except::throw_exception(CONFIG_ERROR,tmp.str(),__func__);
+	}
 	if(!mysql_real_connect(dbp, host.c_str(), user.c_str(), password.c_str(), dbname.c_str(), port, NULL, 0))
 	{
-		cout << __func__<< ": mysql connect db error: "<< mysql_error(dbp) << endl;
+		stringstream tmp;
+		tmp << "mysql connect db error: "<< mysql_error(dbp);
+		cout << __func__<< ": " << tmp.str() << endl;
+		Tango::Except::throw_exception(MYSQL_ERROR,tmp.str(),__func__);
 	}
 	else
 	{
@@ -139,8 +168,10 @@ int HdbMySQL::find_attr_id(string facility, string attr, int &ID)
 	
 	if(mysql_query(dbp, query_str.str().c_str()))
 	{
-		cout<< __func__ << ": ERROR in query=" << query_str.str() << " err="<<mysql_error(dbp)<< endl;
-		return -1;
+		stringstream tmp;
+		tmp << "ERROR in query=" << query_str.str() << ", err=" << mysql_error(dbp);
+		cout << __func__<< ": " << tmp.str() << endl;
+		Tango::Except::throw_exception(QUERY_ERROR,tmp.str(),__func__);
 	}
 	else
 	{
@@ -260,8 +291,10 @@ int HdbMySQL::find_attr_id_type(string facility, string attr, int &ID, int data_
 
 	if(mysql_query(dbp, query_str.str().c_str()))
 	{
-		cout<< __func__ << ": ERROR in query=" << query_str.str() << " err="<<mysql_error(dbp)<< endl;
-		return -1;
+		stringstream tmp;
+		tmp << "ERROR in query=" << query_str.str() << ", err=" << mysql_error(dbp);
+		cout << __func__<< ": " << tmp.str() << endl;
+		Tango::Except::throw_exception(QUERY_ERROR,tmp.str(),__func__);
 	}
 	else
 	{
@@ -327,62 +360,60 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 #ifdef _LIB_DEBUG
 	cout << __func__<< ": entering..." << endl;
 #endif
-	try
-	{
-		string attr_name = data->attr_name; //TODO: fqdn!!
+	string attr_name = data->attr_name; //TODO: fqdn!!
 
-		double	time;
-		vector<double>	dval;
-		vector<double>	dval_r;
-		vector<double>	dval_w;
+	double	time;
+	vector<double>	dval;
+	vector<double>	dval_r;
+	vector<double>	dval_w;
 #if 0
-		Tango::AttributeDimension attr_w_dim = data->attr_value->get_w_dimension();
-		Tango::AttributeDimension attr_r_dim = data->attr_value->get_r_dimension();
-		int data_type = data->attr_value->get_type();
-		//Tango::AttrDataFormat data_format = data->attr_value->get_data_format();	//works if bug 627 fixed
-		Tango::AttrDataFormat data_format = (attr_w_dim.dim_x <= 1 && attr_w_dim.dim_y <= 1 && attr_r_dim.dim_x <= 1 && attr_r_dim.dim_y <= 1) ? \
-				Tango::SCALAR : Tango::SPECTRUM;	//TODO
-		int write_type = (attr_w_dim.dim_x == 0 && attr_w_dim.dim_y == 0) ? Tango::READ : Tango::READ_WRITE;	//TODO
+	Tango::AttributeDimension attr_w_dim = data->attr_value->get_w_dimension();
+	Tango::AttributeDimension attr_r_dim = data->attr_value->get_r_dimension();
+	int data_type = data->attr_value->get_type();
+	//Tango::AttrDataFormat data_format = data->attr_value->get_data_format();	//works if bug 627 fixed
+	Tango::AttrDataFormat data_format = (attr_w_dim.dim_x <= 1 && attr_w_dim.dim_y <= 1 && attr_r_dim.dim_x <= 1 && attr_r_dim.dim_y <= 1) ? \
+			Tango::SCALAR : Tango::SPECTRUM;	//TODO
+	int write_type = (attr_w_dim.dim_x == 0 && attr_w_dim.dim_y == 0) ? Tango::READ : Tango::READ_WRITE;	//TODO
 #else
-		//Tango::AttributeDimension attr_w_dim = ev_data_type.attr_w_dim;
-		//Tango::AttributeDimension attr_r_dim = ev_data_type.attr_r_dim;
-		int data_type = ev_data_type.data_type;
-		Tango::AttrDataFormat data_format = ev_data_type.data_format;
-		int write_type = ev_data_type.write_type;
-		int max_dim_x = ev_data_type.max_dim_x;
-		int max_dim_y = ev_data_type.max_dim_y;
+	//Tango::AttributeDimension attr_w_dim = ev_data_type.attr_w_dim;
+	//Tango::AttributeDimension attr_r_dim = ev_data_type.attr_r_dim;
+	int data_type = ev_data_type.data_type;
+	Tango::AttrDataFormat data_format = ev_data_type.data_format;
+	int write_type = ev_data_type.write_type;
+	int max_dim_x = ev_data_type.max_dim_x;
+	int max_dim_y = ev_data_type.max_dim_y;
 #endif
-		time = data->attr_value->get_date().tv_sec + (double)data->attr_value->get_date().tv_usec/1.0e6;		//event time
-		bool isNull = false;
-		data->attr_value->reset_exceptions(Tango::DeviceAttribute::isempty_flag); //disable is_empty exception
-		if(data->err || data->attr_value->is_empty() || data->attr_value->get_quality() == Tango::ATTR_INVALID)
-		{
+	time = data->attr_value->get_date().tv_sec + (double)data->attr_value->get_date().tv_usec/1.0e6;		//event time
+	bool isNull = false;
+	data->attr_value->reset_exceptions(Tango::DeviceAttribute::isempty_flag); //disable is_empty exception
+	if(data->err || data->attr_value->is_empty() || data->attr_value->get_quality() == Tango::ATTR_INVALID)
+	{
 #ifdef _LIB_DEBUG
-			cout << __func__<< ": going to archive as NULL..." << endl;
+		cout << __func__<< ": going to archive as NULL..." << endl;
 #endif
-			isNull = true;
-			if(data->err)
-			{
-				time = data->get_date().tv_sec + (double)data->get_date().tv_usec/1.0e6;	//receive time
-			}
+		isNull = true;
+		if(data->err)
+		{
+			time = data->get_date().tv_sec + (double)data->get_date().tv_usec/1.0e6;	//receive time
 		}
+	}
 #ifdef _LIB_DEBUG
 		cout << __func__<< ": data_type="<<data_type<<" data_format="<<data_format<<" write_type="<<write_type << " max_dim_x="<<max_dim_x<<" max_dim_y="<<max_dim_y<< endl;
 #endif
 
-		/*if(!isNull)
-		{
-			time = data->attr_value->get_date().tv_sec + (double)data->attr_value->get_date().tv_usec/1.0e6;		//event time
-		}
-		else
-		{
-			time = data->get_date().tv_sec + (double)data->get_date().tv_usec/1.0e6;	//receive time
-		}*/
+	/*if(!isNull)
+	{
+		time = data->attr_value->get_date().tv_sec + (double)data->attr_value->get_date().tv_usec/1.0e6;		//event time
+	}
+	else
+	{
+		time = data->get_date().tv_sec + (double)data->get_date().tv_usec/1.0e6;	//receive time
+	}*/
 
 
 
-		switch(data_type)
-		{
+	switch(data_type)
+	{
 		case Tango::DEV_DOUBLE:
 		{
 			
@@ -403,8 +434,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(dval.size() == 0)
 						dval.push_back(0);//fake value
 					ret = store_double_RO(attr_name, dval, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			else
@@ -426,8 +459,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(dval_w.size() == 0)
 						dval_w.push_back(0);//fake value
 					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			break;
@@ -454,8 +489,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(dval.size() == 0)
 						dval.push_back(0);//fake value
 					ret = store_double_RO(attr_name, dval, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			else
@@ -483,8 +520,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(dval_w.size() == 0)
 						dval_w.push_back(0);//fake value
 					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			break;
@@ -511,8 +550,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(dval.size() == 0)
 						dval.push_back(0);//fake value
 					ret = store_double_RO(attr_name, dval, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			else
@@ -540,8 +581,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(dval_w.size() == 0)
 						dval_w.push_back(0);//fake value
 					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			break;
@@ -568,8 +611,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(dval.size() == 0)
 						dval.push_back(0);//fake value
 					ret = store_double_RO(attr_name, dval, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			else
@@ -597,8 +642,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(dval_w.size() == 0)
 						dval_w.push_back(0);//fake value
 					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			break;
@@ -625,8 +672,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(dval.size() == 0)
 						dval.push_back(0);//fake value
 					ret = store_double_RO(attr_name, dval, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			else
@@ -654,8 +703,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(dval_w.size() == 0)
 						dval_w.push_back(0);//fake value
 					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			break;
@@ -682,8 +733,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(dval.size() == 0)
 						dval.push_back(0);//fake value
 					ret = store_double_RO(attr_name, dval, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			else
@@ -711,8 +764,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(dval_w.size() == 0)
 						dval_w.push_back(0);//fake value
 					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			break;
@@ -739,8 +794,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(dval.size() == 0)
 						dval.push_back(0);//fake value
 					ret = store_double_RO(attr_name, dval, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			else
@@ -768,8 +825,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(dval_w.size() == 0)
 						dval_w.push_back(0);//fake value
 					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			break;
@@ -796,8 +855,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(dval.size() == 0)
 						dval.push_back(0);//fake value
 					ret = store_double_RO(attr_name, dval, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			else
@@ -825,8 +886,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(dval_w.size() == 0)
 						dval_w.push_back(0);//fake value
 					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			break;
@@ -853,8 +916,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(dval.size() == 0)
 						dval.push_back(0);//fake value
 					ret = store_double_RO(attr_name, dval, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			else
@@ -882,8 +947,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(dval_w.size() == 0)
 						dval_w.push_back(0);//fake value
 					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			break;
@@ -910,8 +977,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(dval.size() == 0)
 						dval.push_back(0);//fake value
 					ret = store_double_RO(attr_name, dval, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			else
@@ -939,8 +1008,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(dval_w.size() == 0)
 						dval_w.push_back(0);//fake value
 					ret = store_double_RW(attr_name, dval_r, dval_w, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			break;
@@ -966,8 +1037,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(ssval.size() == 0)
 						ssval.push_back(0);//fake value
 					ret = store_string_RO(attr_name, ssval, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			else
@@ -991,8 +1064,10 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 					if(ssval_w.size() == 0)
 						ssval_w.push_back(0);//fake value
 					ret = store_string_RW(attr_name, ssval_r, ssval_w, time, data_format, true);
-					cout << __func__<<": failed to extract " << attr_name << endl;
-					return -1;
+					stringstream tmp;
+					tmp << "failed to extract " << attr_name;
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 				}
 			}
 			break;
@@ -1017,25 +1092,11 @@ int HdbMySQL::insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type)
 		{
 			TangoSys_MemStream	os;
 			os << "Attribute " << data->attr_name<< " type (" << (int)data_type << ") not supported";
-			cout << os.str() << endl;
-			return -1;
-		}
+			cout << __func__ << ": "<< os.str() << endl;
+			Tango::Except::throw_exception(DATA_ERROR,os.str(),__func__);
 		}
 	}
-	catch(Tango::DevFailed &e)
-	{
 
-		cout << __func__<<": Exception on " << data->attr_name << ":" << endl;
-		
-		for (unsigned int i=0; i<e.errors.length(); i++)
-		{
-			cout << e.errors[i].reason << endl;
-			cout << e.errors[i].desc << endl;
-			cout << e.errors[i].origin << endl;
-		}
- 
-		cout << endl;	
-	}
 #ifdef _LIB_DEBUG
 //	cout << __func__<< ": exiting... ret="<<ret << endl;
 #endif
@@ -1061,9 +1122,8 @@ int HdbMySQL::store_double_RO(string attr, vector<double> value, double time, Ta
 	find_attr_id(facility, attr_name, ID);
 	if(ID == -1)
 	{
-
 		cout << __func__<< ": ID not found!" << endl;
-		return -1;
+		Tango::Except::throw_exception(DATA_ERROR,"ID not found",__func__);
 	}
 
 	ostringstream query_str;
@@ -1104,8 +1164,10 @@ int HdbMySQL::store_double_RO(string attr, vector<double> value, double time, Ta
 
 		if(mysql_query(dbp, query_str.str().c_str()))
 		{
-			cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
-			return -1;
+			stringstream tmp;
+			tmp << "Error in query='" <<query_str.str()<< "', err=" << mysql_error(dbp);
+			cout << __func__<< ": " << tmp.str() << endl;
+			Tango::Except::throw_exception(QUERY_ERROR,tmp.str(),__func__);
 		}
 		else
 		{
@@ -1162,11 +1224,13 @@ int HdbMySQL::store_double_RO(string attr, vector<double> value, double time, Ta
 
 		if (mysql_stmt_execute(pstmt))
 		{
-			cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
+			stringstream tmp;
+			tmp << "ERROR in query=" << query_str.str() << ", err=" << mysql_error(dbp);
+			cout << __func__<< ": " << tmp.str() << endl;
 			delete [] plog_bind;
 			if (mysql_stmt_close(pstmt))
 				cout << __func__<< ": failed while closing the statement" << endl;
-			return -1;
+			Tango::Except::throw_exception(QUERY_ERROR,tmp.str(),__func__);
 		}
 		else
 		{
@@ -1196,9 +1260,8 @@ int HdbMySQL::store_double_RW(string attr, vector<double> value_r, vector<double
 	find_attr_id(facility, attr_name, ID);
 	if(ID == -1)
 	{
-
 		cout << __func__<< ": ID not found!" << endl;
-		return -1;
+		Tango::Except::throw_exception(DATA_ERROR,"ID not found",__func__);
 	}
 
 	ostringstream query_str;
@@ -1255,8 +1318,10 @@ int HdbMySQL::store_double_RW(string attr, vector<double> value_r, vector<double
 
 		if(mysql_query(dbp, query_str.str().c_str()))
 		{
-			cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
-			return -1;
+			stringstream tmp;
+			tmp << "Error in query='" <<query_str.str()<< "', err=" << mysql_error(dbp);
+			cout << __func__<< ": " << tmp.str() << endl;
+			Tango::Except::throw_exception(QUERY_ERROR,tmp.str(),__func__);
 		}
 		else
 		{
@@ -1296,15 +1361,17 @@ int HdbMySQL::store_double_RW(string attr, vector<double> value_r, vector<double
 		{
 			cout << __func__<< ": mysql_stmt_init(), out of memory" << endl;
 			delete [] plog_bind;
-			return -1;
+			Tango::Except::throw_exception(QUERY_ERROR,"mysql_stmt_init(): out of memory",__func__);
 		}
 		if (mysql_stmt_prepare(pstmt, query_str.str().c_str(), query_str.str().length()))
 		{
-			cout << __func__<< ": mysql_stmt_prepare(), INSERT failed query='" << query_str.str() << "' err="<< mysql_stmt_error(pstmt)<< endl;
+			stringstream tmp;
+			tmp << "mysql_stmt_prepare(), INSERT failed" << ", err=" << mysql_stmt_error(pstmt);
+			cout << __func__<< ": " << tmp.str() << endl;
 			delete [] plog_bind;
 			if (mysql_stmt_close(pstmt))
 				cout << __func__<< ": failed while closing the statement" << endl;
-			return -1;
+			Tango::Except::throw_exception(QUERY_ERROR,tmp.str(),__func__);
 		}
 
 		/*param_count= mysql_stmt_param_count(pstmt);
@@ -1329,20 +1396,24 @@ int HdbMySQL::store_double_RW(string attr, vector<double> value_r, vector<double
 
 		if (mysql_stmt_bind_param(pstmt, plog_bind))
 		{
-			cout << __func__<< ": mysql_stmt_bind_param() failed query='" << query_str.str() << "'" << endl;
+			stringstream tmp;
+			tmp << "mysql_stmt_bind_param() failed" << ", err=" << mysql_stmt_error(pstmt);
+			cout << __func__<< ": " << tmp.str() << endl;
 			delete [] plog_bind;
 			if (mysql_stmt_close(pstmt))
 				cout << __func__<< ": failed while closing the statement" << endl;
-			return -1;
+			Tango::Except::throw_exception(QUERY_ERROR,tmp.str(),__func__);
 		}
 
 		if (mysql_stmt_execute(pstmt))
 		{
-			cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
+			stringstream tmp;
+			tmp << "ERROR in query=" << query_str.str() << ", err=" << mysql_stmt_error(pstmt);
+			cout<< __func__ << ": " << tmp.str() << endl;
 			delete [] plog_bind;
 			if (mysql_stmt_close(pstmt))
 				cout << __func__<< ": failed while closing the statement" << endl;
-			return -1;
+			Tango::Except::throw_exception(QUERY_ERROR,tmp.str(),__func__);
 		}
 		else
 		{
@@ -1371,9 +1442,8 @@ int HdbMySQL::store_string_RO(string attr, vector<string> value, double time, Ta
 	find_attr_id(facility, attr_name, ID);
 	if(ID == -1)
 	{
-
 		cout << __func__<< ": ID not found!" << endl;
-		return -1;
+		Tango::Except::throw_exception(DATA_ERROR,"ID not found",__func__);
 	}
 
 	ostringstream query_str;
@@ -1407,8 +1477,10 @@ int HdbMySQL::store_string_RO(string attr, vector<string> value, double time, Ta
 
 	if(mysql_query(dbp, query_str.str().c_str()))
 	{
-		cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
-		return -1;
+		stringstream tmp;
+		tmp << "Error in query='" <<query_str.str()<< "', err=" << mysql_error(dbp);
+		cout << __func__<< ": " << tmp.str() << endl;
+		Tango::Except::throw_exception(QUERY_ERROR,tmp.str(),__func__);
 	}
 	else
 	{
@@ -1430,9 +1502,8 @@ int HdbMySQL::store_string_RW(string attr, vector<string> value_r, vector<string
 	find_attr_id(facility, attr_name, ID);
 	if(ID == -1)
 	{
-
 		cout << __func__<< ": ID not found!" << endl;
-		return -1;
+		Tango::Except::throw_exception(DATA_ERROR,"ID not found",__func__);
 	}
 
 	ostringstream query_str;
@@ -1473,8 +1544,10 @@ int HdbMySQL::store_string_RW(string attr, vector<string> value_r, vector<string
 
 	if(mysql_query(dbp, query_str.str().c_str()))
 	{
-		cout<< __func__ << ": ERROR in query=" << query_str.str() << endl;
-		return -1;
+		stringstream tmp;
+		tmp << "Error in query='" <<query_str.str()<< "', err=" << mysql_error(dbp);
+		cout << __func__<< ": " << tmp.str() << endl;
+		Tango::Except::throw_exception(QUERY_ERROR,tmp.str(),__func__);
 	}
 	else
 	{
@@ -1485,7 +1558,7 @@ int HdbMySQL::store_string_RW(string attr, vector<string> value_r, vector<string
 	return 0;
 }
 
-int HdbMySQL::configure_Attr(string name, int type/*DEV_DOUBLE, DEV_STRING, ..*/, int format/*SCALAR, SPECTRUM, ..*/, int write_type/*READ, READ_WRITE, ..*/)
+int HdbMySQL::configure_Attr(string name, int type/*DEV_DOUBLE, DEV_STRING, ..*/, int format/*SCALAR, SPECTRUM, ..*/, int write_type/*READ, READ_WRITE, ..*/, unsigned int ttl/*hours, 0=infinity*/)
 {
 	ostringstream insert_str;
 	string facility = get_only_tango_host(name);
@@ -1496,8 +1569,10 @@ int HdbMySQL::configure_Attr(string name, int type/*DEV_DOUBLE, DEV_STRING, ..*/
 	//ID already present but different configuration (attribute type)
 	if(ret == -2)
 	{
-		cout<< __func__ << ": ERROR "<<facility<<"/"<<attr_name<<" already configured with ID="<<id << endl;
-		return -1;
+		stringstream tmp;
+		tmp << "ERROR "<<facility<<"/"<<attr_name<<" already configured with ID="<<id;
+		cout << __func__<< ": " << tmp.str() << endl;
+		Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 	}
 
 	//ID found and same configuration (attribute type): do nothing
@@ -1515,8 +1590,10 @@ int HdbMySQL::configure_Attr(string name, int type/*DEV_DOUBLE, DEV_STRING, ..*/
 
 	if(mysql_query(dbp, insert_str.str().c_str()))
 	{
-		cout<< __func__ << ": ERROR in query=" << insert_str.str() << endl;
-		return -1;
+		stringstream tmp;
+		tmp << "ERROR in query=" << insert_str.str() << ", err=" << mysql_error(dbp);
+		cout << __func__<< ": " << tmp.str() << endl;
+		Tango::Except::throw_exception(QUERY_ERROR,tmp.str(),__func__);
 	}
 
 	else
@@ -1591,24 +1668,30 @@ int HdbMySQL::configure_Attr(string name, int type/*DEV_DOUBLE, DEV_STRING, ..*/
 			break;
 			default:
 			{
-				cout << __func__ << ": attribute type not supported: data_type="<< type << " data_format=" << format << " writable=" << write_type << endl;
+				stringstream tmp;
+				tmp << "attribute type not supported: data_type="<< type << " data_format=" << format << " writable=" << write_type;
+				cout << __func__<< ": " << tmp.str() << endl;
 				create_str <<
 						"DELETE FROM " << m_dbname << "." << ADT_TABLE_NAME << " WHERE "<<
 							ADT_COL_FULL_NAME <<"='" << attr_name << "' AND "<<ADT_COL_ID<<"="<<last_id;
 				if(mysql_query(dbp, create_str.str().c_str()))
 				{
-					cout<< __func__ << ": ERROR in query=" << create_str.str() << endl;
-					return -1;
+					stringstream tmp2;
+					tmp2 << "ERROR in query=" << create_str.str() << ", err=" << mysql_error(dbp);
+					cout << __func__<< ": " << tmp2.str() << endl;
+					Tango::Except::throw_exception(QUERY_ERROR,tmp2.str(),__func__);
 				}
-				return -1;
+				Tango::Except::throw_exception(QUERY_ERROR,tmp.str(),__func__);
 			}
 		}
 
 
 		if(mysql_query(dbp, create_str.str().c_str()))
 		{
-			cout<< __func__ << ": ERROR in query=" << create_str.str() << endl;
-			return -1;
+			stringstream tmp;
+			tmp << "ERROR in query=" << create_str.str() << ", err=" << mysql_error(dbp);
+			cout << __func__<< ": " << tmp.str() << endl;
+			Tango::Except::throw_exception(QUERY_ERROR,tmp.str(),__func__);
 		}
 		return 0;
 	}
@@ -1636,8 +1719,10 @@ int HdbMySQL::event_Attr(string name, unsigned char event)
 		}
 		default:
 		{
-			cout<< __func__ << ": ERROR for " << name << " event=" << (int)event << " NOT SUPPORTED" << endl;
-			return -1;
+			stringstream tmp;
+			tmp << "ERROR for "<<name<<" event=" << (int)event << " NOT SUPPORTED";
+			cout << __func__<< ": " << tmp.str() << endl;
+			Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 		}
 	}
 	return -1;
@@ -1659,8 +1744,10 @@ int HdbMySQL::start_Attr(string name)
 	int ret = find_attr_id(facility, attr_name, id);
 	if(ret < 0)
 	{
-		cout<< __func__ << ": ERROR "<<facility<<"/"<<attr_name<<" NOT FOUND" << endl;
-		return -1;
+		stringstream tmp;
+		tmp << "ERROR "<<facility<<"/"<<attr_name<<" NOT FOUND";
+		cout << __func__<< ": " << tmp.str() << endl;
+		Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 	}
 
 	insert_event_str <<
@@ -1669,8 +1756,10 @@ int HdbMySQL::start_Attr(string name)
 
 	if(mysql_query(dbp, insert_event_str.str().c_str()))
 	{
-		cout<< __func__ << ": ERROR in query=" << insert_event_str.str() << endl;
-		return -1;
+		stringstream tmp;
+		tmp << "Error in query='" <<insert_event_str.str()<< "', err=" << mysql_error(dbp);
+		cout << __func__<< ": " << tmp.str() << endl;
+		Tango::Except::throw_exception(QUERY_ERROR,tmp.str(),__func__);
 	}
 #ifdef _LIB_DEBUG
 	else
@@ -1691,8 +1780,10 @@ int HdbMySQL::stop_Attr(string name)
 	int ret = find_attr_id(facility, attr_name, id);
 	if(ret < 0)
 	{
-		cout<< __func__ << ": ERROR "<<facility<<"/"<<attr_name<<" NOT FOUND" << endl;
-		return -1;
+		stringstream tmp;
+		tmp << "ERROR "<<facility<<"/"<<attr_name<<" NOT FOUND";
+		cout << __func__<< ": " << tmp.str() << endl;
+		Tango::Except::throw_exception(DATA_ERROR,tmp.str(),__func__);
 	}
 
 	query_str <<
@@ -1701,8 +1792,10 @@ int HdbMySQL::stop_Attr(string name)
 
 	if(mysql_query(dbp, query_str.str().c_str()))
 	{
-		cout<< __func__ << ": ERROR in query=" << query_str.str() << " err="<<mysql_error(dbp)<< endl;
-		return -1;
+		stringstream tmp;
+		tmp << "Error in query='" <<query_str.str()<< "', err=" << mysql_error(dbp);
+		cout << __func__<< ": " << tmp.str() << endl;
+		Tango::Except::throw_exception(QUERY_ERROR,tmp.str(),__func__);
 	}
 	else
 	{
@@ -1724,8 +1817,10 @@ int HdbMySQL::stop_Attr(string name)
 
 			if(mysql_query(dbp, insert_event_str.str().c_str()))
 			{
-				cout<< __func__ << ": ERROR in query=" << insert_event_str.str() << endl;
-				return -1;
+				stringstream tmp;
+				tmp << "Error in query='" <<insert_event_str.str()<< "', err=" << mysql_error(dbp);
+				cout << __func__<< ": " << tmp.str() << endl;
+				Tango::Except::throw_exception(QUERY_ERROR,tmp.str(),__func__);
 			}
 #ifdef _LIB_DEBUG
 			else
@@ -1747,9 +1842,11 @@ int HdbMySQL::stop_Attr(string name)
 
 				if(mysql_query(dbp, insert_event_str.str().c_str()))
 				{
-					cout<< __func__ << ": ERROR in query=" << insert_event_str.str() << endl;
 					mysql_free_result(res);
-					return -1;
+					stringstream tmp;
+					tmp << "Error in query='" <<insert_event_str.str()<< "', err=" << mysql_error(dbp);
+					cout << __func__<< ": " << tmp.str() << endl;
+					Tango::Except::throw_exception(QUERY_ERROR,tmp.str(),__func__);
 				}
 #ifdef _LIB_DEBUG
 				else
@@ -1767,9 +1864,11 @@ int HdbMySQL::stop_Attr(string name)
 
 			if(mysql_query(dbp, update_event_str.str().c_str()))
 			{
-				cout<< __func__ << ": ERROR in query=" << update_event_str.str() << endl;
 				mysql_free_result(res);
-				return -1;
+				stringstream tmp;
+				tmp << "Error in query='" <<update_event_str.str()<< "', err=" << mysql_error(dbp);
+				cout << __func__<< ": " << tmp.str() << endl;
+				Tango::Except::throw_exception(QUERY_ERROR,tmp.str(),__func__);
 			}
 #ifdef _LIB_DEBUG
 			else
@@ -1921,10 +2020,20 @@ void HdbMySQL::string_explode(string str, string separator, vector<string>* resu
 	}
 }
 #endif
-
-AbstractDB* HdbMySQLFactory::create_db(string host, string user, string password, string dbname, int port)
+void HdbMySQL::string_vector2map(vector<string> str, string separator, map<string,string>* results)
 {
-	return new HdbMySQL(host, user, password, dbname, port); 
+	for(vector<string>::iterator it=str.begin(); it != str.end(); it++)
+	{
+		string::size_type found_eq;
+		found_eq = it->find_first_of(separator);
+		if(found_eq != string::npos && found_eq > 0)
+			results->insert(make_pair(it->substr(0,found_eq),it->substr(found_eq+1)));
+	}
+}
+
+AbstractDB* HdbMySQLFactory::create_db(vector<string> configuration)
+{
+	return new HdbMySQL(configuration);
 }
 
 DBFactory *HdbClient::getDBFactory()

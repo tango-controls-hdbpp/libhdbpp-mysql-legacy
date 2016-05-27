@@ -104,6 +104,7 @@ private:
 #ifdef _MULTI_TANGO_HOST
 	void string_explode(string str, string separator, vector<string>* results);
 #endif
+	void string_vector2map(vector<string> str, string separator, map<string,string>* results);
 
 	Attr_Type get_attr_type(int data_type, int data_format, int writable);
 
@@ -116,7 +117,7 @@ public:
 
 	~HdbMySQL();
 
-	HdbMySQL(string host, string user, string password, string dbname, int port);  
+	HdbMySQL(vector<string> configuration);
 
 	//void connect_db(string host, string user, string password, string dbname);
 
@@ -124,7 +125,7 @@ public:
 	int find_attr_id_type(string facility, string attr_name, int &ID, int data_type, int data_format, int writable);
 	virtual int insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type);
 	virtual int insert_param_Attr(Tango::AttrConfEventData *data, HdbEventDataType ev_data_type);
-	virtual int configure_Attr(string name, int type/*DEV_DOUBLE, DEV_STRING, ..*/, int format/*SCALAR, SPECTRUM, ..*/, int write_type/*READ, READ_WRITE, ..*/);
+	virtual int configure_Attr(string name, int type/*DEV_DOUBLE, DEV_STRING, ..*/, int format/*SCALAR, SPECTRUM, ..*/, int write_type/*READ, READ_WRITE, ..*/, unsigned int ttl/*hours, 0=infinity*/);
 	virtual int event_Attr(string name, unsigned char event);
 };
 
@@ -132,7 +133,7 @@ class HdbMySQLFactory : public DBFactory
 {
 
 public:
-	virtual AbstractDB* create_db(string host, string user, string password, string dbname, int port);
+	virtual AbstractDB* create_db(vector<string> configuration);
 
 };
 
