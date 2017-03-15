@@ -2036,9 +2036,9 @@ AbstractDB* HdbMySQLFactory::create_db(vector<string> configuration)
 	return new HdbMySQL(configuration);
 }
 
-DBFactory *HdbClient::getDBFactory()
+DBFactory *getDBFactory()
 {
 	HdbMySQLFactory *db_mysql_factory = new HdbMySQLFactory();
-	return static_cast<DBFactory*>(db_mysql_factory);//TODO
+	return static_cast<DBFactory*>(db_mysql_factory);
 }
 
