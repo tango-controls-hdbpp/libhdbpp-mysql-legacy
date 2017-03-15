@@ -1697,6 +1697,12 @@ int HdbMySQL::configure_Attr(string name, int type/*DEV_DOUBLE, DEV_STRING, ..*/
 	}
 }
 
+int HdbMySQL::updateTTL_Attr(string name, unsigned int ttl/*hours, 0=infinity*/)
+{
+	//TODO: implement
+	return 0;
+}
+
 int HdbMySQL::event_Attr(string name, unsigned char event)
 {
 	switch(event)
