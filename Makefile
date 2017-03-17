@@ -1,6 +1,5 @@
 LIBHDBPP_DIR = .libhdbpp
 LIBHDBPP_INC = ./$(LIBHDBPP_DIR)/src
-MAKE_INC = .hdbpp-common
 
 DBIMPL_INC = `mysql_config --include`
 DBIMPL_LIB = `mysql_config --libs_r`
