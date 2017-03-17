@@ -5,10 +5,13 @@ MAKE_INC = .hdbpp-common
 DBIMPL_INC = `mysql_config --include`
 DBIMPL_LIB = `mysql_config --libs_r`
 
-include ./$(MAKE_INC)/Make-hdbpp.in
+TANGO_INC := ${TANGO_DIR}/include/tango
+OMNIORB_INC := ${OMNIORB_DIR}/include
+ZMQ_INC :=  ${ZMQ_DIR}/include
+
+INC_DIR = -I${TANGO_INC} -I${OMNIORB_INC} -I${ZMQ_INC}
 
 CXXFLAGS += -std=gnu++0x -Wall -DRELEASE='"$HeadURL$ "' $(DBIMPL_INC) $(INC_DIR) -I$(LIBHDBPP_INC)
-
 
 ##############################################
 # support for shared libray versioning
