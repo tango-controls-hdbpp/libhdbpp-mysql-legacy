@@ -93,10 +93,10 @@ private:
 	map<string,int> attr_ID_map;
 	
 
-	int store_double_RO(string attr, vector<double> value, double time, Tango::AttrDataFormat data_format, bool isNull=false);
-	int store_double_RW(string attr, vector<double> value_r, vector<double> value_W, double time, Tango::AttrDataFormat data_format, bool isNull=false);
-	int store_string_RO(string attr, vector<string> value, double time, Tango::AttrDataFormat data_format, bool isNull=false);
-	int store_string_RW(string attr, vector<string> value_r, vector<string> value_w, double time, Tango::AttrDataFormat data_format, bool isNull=false);
+	void store_double_RO(string attr, vector<double> value, double time, Tango::AttrDataFormat data_format, bool isNull=false);
+	void store_double_RW(string attr, vector<double> value_r, vector<double> value_W, double time, Tango::AttrDataFormat data_format, bool isNull=false);
+	void store_string_RO(string attr, vector<string> value, double time, Tango::AttrDataFormat data_format, bool isNull=false);
+	void store_string_RW(string attr, vector<string> value_r, vector<string> value_w, double time, Tango::AttrDataFormat data_format, bool isNull=false);
 	
 	string get_only_attr_name(string str);
 	string get_only_tango_host(string str);
@@ -108,10 +108,10 @@ private:
 
 	Attr_Type get_attr_type(int data_type, int data_format, int writable);
 
-	int remove_Attr(string name);
-	int start_Attr(string name);
-	int stop_Attr(string name);
-	int pause_Attr(string name);
+	void remove_Attr(string name);
+	void start_Attr(string name);
+	void stop_Attr(string name);
+	void pause_Attr(string name);
 
 public:
 
@@ -123,11 +123,11 @@ public:
 
 	int find_attr_id(string facility, string attr_name, int &ID);
 	int find_attr_id_type(string facility, string attr_name, int &ID, int data_type, int data_format, int writable);
-	virtual int insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type);
-	virtual int insert_param_Attr(Tango::AttrConfEventData *data, HdbEventDataType ev_data_type);
-	virtual int configure_Attr(string name, int type/*DEV_DOUBLE, DEV_STRING, ..*/, int format/*SCALAR, SPECTRUM, ..*/, int write_type/*READ, READ_WRITE, ..*/, unsigned int ttl/*hours, 0=infinity*/);
-	virtual int updateTTL_Attr(string name, unsigned int ttl/*hours, 0=infinity*/);
-	virtual int event_Attr(string name, unsigned char event);
+	virtual void insert_Attr(Tango::EventData *data, HdbEventDataType ev_data_type);
+	virtual void insert_param_Attr(Tango::AttrConfEventData *data, HdbEventDataType ev_data_type);
+	virtual void configure_Attr(string name, int type/*DEV_DOUBLE, DEV_STRING, ..*/, int format/*SCALAR, SPECTRUM, ..*/, int write_type/*READ, READ_WRITE, ..*/, unsigned int ttl/*hours, 0=infinity*/);
+	virtual void updateTTL_Attr(string name, unsigned int ttl/*hours, 0=infinity*/);
+	virtual void event_Attr(string name, unsigned char event);
 };
 
 class HdbMySQLFactory : public DBFactory
